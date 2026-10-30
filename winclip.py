@@ -119,8 +119,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         "command",
         nargs="?",
         default="show",
-        choices=("show", "snip", "daemon", "quit"),
-        help="default: show (snip: screen capture overlay)",
+        choices=("show", "snip", "shot", "daemon", "quit"),
+        help="default: show (snip: screen capture overlay, shot: full-screen auto-save)",
     )
     parser.add_argument(
         "--daemon",
@@ -138,7 +138,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"{APP_NAME}: not running")
         return 0
 
-    requested = "show" if command == "show" else ("snip" if command == "snip" else "ping")
+    requested = (
+        "show"
+        if command == "show"
+        else (
+            "snip"
+            if command == "snip"
+            else ("shot" if command == "shot" else "ping")
+        )
+    )
     if send_message(path, requested):
         return 0
 
@@ -164,6 +172,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return run_daemon(
             show_initial=(command == "show"),
             snip_initial=(command == "snip"),
+            shot_initial=(command == "shot"),
             data_directory=data_dir(),
             socket_file=path,
             instance_lock=lock,

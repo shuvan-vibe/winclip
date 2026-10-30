@@ -2864,6 +2864,9 @@ class WinClipDaemon(QObject):
         elif command == "snip":
             self._reply(client, "ok")
             QTimer.singleShot(0, self.request_snip)
+        elif command == "shot":
+            self._reply(client, "ok")
+            QTimer.singleShot(0, self.request_shot)
         elif command == "ping":
             self._reply(client, "ok")
         elif command == "quit":
@@ -2932,6 +2935,24 @@ class WinClipDaemon(QObject):
 
     def _on_snip_closed(self) -> None:
         self.snip_overlay = None
+
+    def request_shot(self) -> None:
+        """Capture full screen and save directly to disk without modifying clipboard."""
+        try:
+            if self.popup is not None and self.popup.isVisible():
+                self.popup.hide()
+                self.app.processEvents()
+
+            pixmap, total_geom = grab_full_screen()
+            if pixmap.isNull():
+                return
+            image = pixmap.toImage()
+            path = save_screenshot_to_file(image)
+            if path:
+                self.toast = ToastNotification("Screenshot saved", 600)
+                self.toast.show()
+        except Exception as exc:
+            _warn(f"could not capture and save full screen: {exc}")
 
     def _create_popup(self) -> ClipboardPopup:
         popup = ClipboardPopup(self.store.images_dir, self.store.categories)
@@ -3120,6 +3141,7 @@ def run_daemon(
     socket_file: Path,
     instance_lock,
     snip_initial: bool = False,
+    shot_initial: bool = False,
 ) -> int:
     """Create the Qt application and enter the event-driven daemon loop."""
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
@@ -3148,6 +3170,8 @@ def run_daemon(
         QTimer.singleShot(0, daemon.request_show)
     elif snip_initial:
         QTimer.singleShot(0, daemon.request_snip)
+    elif shot_initial:
+        QTimer.singleShot(0, daemon.request_shot)
     return app.exec_()
 
 

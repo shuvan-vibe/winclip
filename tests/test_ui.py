@@ -593,6 +593,34 @@ class UiTests(unittest.TestCase):
         overlay.close()
         self.app.processEvents()
 
+    def test_daemon_request_shot_saves_without_clipboard(self) -> None:
+        target_dir = self.data / "Screenshots"
+        os.environ["WINCLIP_SCREENSHOTS_DIR"] = str(target_dir)
+        try:
+            # Set initial text on clipboard
+            self.app.clipboard().setText("do-not-overwrite-me")
+            self.app.processEvents()
+
+            from winclip_app import WinClipDaemon
+
+            socket_file = self.data / "test.sock"
+            daemon = WinClipDaemon(self.app, self.data, socket_file, None)
+            try:
+                daemon.request_shot()
+                self.app.processEvents()
+
+                # Verify file was created in screenshots dir
+                files = list(target_dir.glob("Screenshot_*.png"))
+                self.assertGreaterEqual(len(files), 1)
+
+                # Verify clipboard was untouched
+                self.assertEqual(self.app.clipboard().text(), "do-not-overwrite-me")
+            finally:
+                daemon.cleanup()
+                self.app.processEvents()
+        finally:
+            os.environ.pop("WINCLIP_SCREENSHOTS_DIR", None)
+
 
 if __name__ == "__main__":
     unittest.main()
