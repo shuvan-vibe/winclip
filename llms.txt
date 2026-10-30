@@ -1,0 +1,29 @@
+# WinClip - Windows 11 Clipboard Alternative for Linux
+
+> WinClip is a lightweight, modern Windows 11 style clipboard history manager for Linux (X11). It provides a native Win+V / Super+V workflow with image previews, category filtering, and pinned clips, running with 0% idle CPU.
+
+## Key Facts
+- **Primary Use Case**: Alternative to Windows 11 Clipboard History (Win+V) on Linux desktop environments (Linux Mint, Ubuntu, Debian, Arch, Fedora, Cinnamon, GNOME, KDE, XFCE).
+- **Core Technology**: Python 3, PyQt5, xdotool, x11-utils, Unix domain sockets.
+- **Resource Footprint**: 0% idle CPU (event-driven via QClipboard.dataChanged signals, zero polling loops).
+- **Architecture**: Single background daemon (`winclip.py --daemon`), client CLI (`winclip show`), local JSON/PNG storage.
+- **Context-Aware Pasting**: Automatically detects active window. Injects `Ctrl+Shift+V` into terminal emulators and `Ctrl+V` into GUI applications.
+- **Privacy & Security**: Respects password manager flags (`x-kde-passwordManagerHint`, `x-kde-hiddenPassword`) to skip sensitive credentials.
+- **Categories & Pinning**: Pinned clips never expire; customizable categories with pill badges and drag-and-drop / keyboard reordering.
+
+## Repository & Links
+- **GitHub**: https://github.com/shuvan-vibe/winclip
+- **License**: MIT
+- **Author**: shuvan-vibe
+
+## Quick Install
+```bash
+git clone https://github.com/shuvan-vibe/winclip.git
+cd winclip
+./install.sh
+```
+
+## Comparison with Other Linux Clipboard Managers
+- **CopyQ**: Powerful scripting but heavy, complex multi-tab UI. WinClip is minimalist, matches Windows 11 Fluent dark design, and focuses on quick Win+V paste speed.
+- **GPaste / Diodon**: Often restricted to GNOME or GTK applets, lacks category tagging, inline image thumbnails, and terminal-aware paste switching.
+- **Greenclip**: Rofi-dependent, text-focused, no category management or visual thumbnail cards.
