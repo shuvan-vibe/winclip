@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import gc
 import os
 import re
 import shutil
@@ -166,6 +167,30 @@ def _run_xdotool(args: List[str], timeout: float = 1.2) -> Optional[subprocess.C
 
 def active_window_id() -> Optional[int]:
     """Read the currently focused X11 window before our popup is shown."""
+    # Fast path: Read _NET_ACTIVE_WINDOW directly from the root window using xprop
+    try:
+        res = subprocess.run(
+            ["xprop", "-root", "_NET_ACTIVE_WINDOW"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=0.6,
+            check=False,
+        )
+        if res.returncode == 0:
+            match = re.search(
+                r"_NET_ACTIVE_WINDOW\(WINDOW\): window id # (0x[0-9a-fA-F]+|\d+)",
+                res.stdout,
+            )
+            if match:
+                val = match.group(1)
+                wid = int(val, 16) if val.startswith("0x") else int(val)
+                if wid > 0:
+                    return wid
+    except Exception:
+        pass
+
+    # Fallback to xdotool
     result = _run_xdotool(["getactivewindow"], timeout=1.0)
     if result is None or result.returncode != 0:
         return None
@@ -267,6 +292,8 @@ def query_visible_windows() -> Tuple[List[Dict[str, Any]], bool]:
 
     # _NET_CLIENT_LIST_STACKING is bottom-to-top; reverse to walk top-to-bottom
     wids.reverse()
+    # Optimization: Inspect at most the top 20 windows (lower ones are hidden beneath)
+    wids = wids[:20]
 
     results: List[Dict[str, Any]] = []
     for wid in wids:
@@ -370,6 +397,10 @@ def query_visible_windows() -> Tuple[List[Dict[str, Any]], bool]:
             h += border * 2
 
         results.append({"id": wid, "rect": QRect(x, y, w, h)})
+
+        # Optimization: If this window is fullscreen, it occludes all windows behind it
+        if "_NET_WM_STATE_FULLSCREEN" in p_out:
+            break
 
     return results, False
 
@@ -1099,6 +1130,8 @@ class ClipboardPopup(QWidget):
         self._category: Optional[str] = None
         self._opened_above = False
         self._anchor_bottom = 0
+        self._shadow_cache: Optional[QPixmap] = None
+        self._shadow_panel_geom: Optional[QRect] = None
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.setInterval(140)
@@ -1307,10 +1340,20 @@ class ClipboardPopup(QWidget):
             """
         )
 
-    def paintEvent(self, event) -> None:  # noqa: N802
-        painter = QPainter(self)
+    def _get_shadow_cache(self) -> QPixmap:
+        p_geom = self.panel.geometry()
+        if (
+            self._shadow_cache is not None
+            and self._shadow_panel_geom == p_geom
+            and self._shadow_cache.size() == self.size()
+        ):
+            return self._shadow_cache
+
+        pix = QPixmap(self.size())
+        pix.fill(Qt.transparent)
+        painter = QPainter(pix)
         painter.setRenderHint(QPainter.Antialiasing)
-        panel_rect = QRectF(self.panel.geometry())
+        panel_rect = QRectF(p_geom)
         painter.setPen(Qt.NoPen)
         for step in range(16, 0, -1):
             spread = float(step)
@@ -1327,6 +1370,14 @@ class ClipboardPopup(QWidget):
                 PANEL_RADIUS + spread,
                 PANEL_RADIUS + spread,
             )
+        painter.end()
+        self._shadow_cache = pix
+        self._shadow_panel_geom = QRect(p_geom)
+        return pix
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.drawPixmap(0, 0, self._get_shadow_cache())
 
     # ---------------------------------------------------------------- categories
 
@@ -2970,6 +3021,8 @@ class WinClipDaemon(QObject):
                 return
             image = pixmap.toImage()
             path = save_screenshot_to_file(image)
+            del pixmap, image
+            gc.collect(0)
             if path:
                 self.toast = ToastNotification("Screenshot saved", 600)
                 self.toast.show()

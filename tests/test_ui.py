@@ -623,6 +623,18 @@ class UiTests(unittest.TestCase):
         finally:
             os.environ.pop("WINCLIP_SCREENSHOTS_DIR", None)
 
+    def test_popup_shadow_cache(self) -> None:
+        popup = ClipboardPopup(self.data / "images", ["Work"])
+        self.assertIsNone(popup._shadow_cache)
+        pix1 = popup._get_shadow_cache()
+        self.assertFalse(pix1.isNull())
+        self.assertIs(popup._shadow_cache, pix1)
+        # Calling again without geometry change returns same cache
+        pix2 = popup._get_shadow_cache()
+        self.assertIs(pix1, pix2)
+        popup.close()
+        self.app.processEvents()
+
 
 if __name__ == "__main__":
     unittest.main()
