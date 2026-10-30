@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PyQt5.QtCore import (
     QBuffer,
@@ -220,6 +222,230 @@ def refocus_and_paste(window_id: Optional[int], terminal: bool) -> None:
     time.sleep(PASTE_DELAY_MS / 1000.0)
     combo = "ctrl+shift+v" if terminal else "ctrl+v"
     _run_xdotool(["key", "--clearmodifiers", combo], timeout=1.0)
+
+
+def query_visible_windows() -> Tuple[List[Dict[str, Any]], bool]:
+    """Retrieve top-level visible non-minimized windows in top-to-bottom stacking order.
+
+    Returns (windows, detection_failed). Each window is a dict with 'id' and 'rect' (QRect in virtual desktop coords).
+    """
+    has_xprop = shutil.which("xprop") is not None
+    has_xwininfo = shutil.which("xwininfo") is not None
+    has_xdotool = shutil.which("xdotool") is not None
+
+    if not has_xprop or not (has_xwininfo or has_xdotool):
+        _warn("xprop or xwininfo/xdotool not found; window detection disabled")
+        return [], True
+
+    try:
+        res = subprocess.run(
+            ["xprop", "-root", "_NET_CLIENT_LIST_STACKING"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=1.0,
+            check=False,
+        )
+        out = res.stdout
+        if "_NET_CLIENT_LIST_STACKING" not in out:
+            res = subprocess.run(
+                ["xprop", "-root", "_NET_CLIENT_LIST"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=1.0,
+                check=False,
+            )
+            out = res.stdout
+    except Exception as exc:
+        _warn(f"could not query window stack: {exc}")
+        return [], True
+
+    wids = re.findall(r"0x[0-9a-fA-F]+", out)
+    if not wids:
+        return [], False
+
+    # _NET_CLIENT_LIST_STACKING is bottom-to-top; reverse to walk top-to-bottom
+    wids.reverse()
+
+    results: List[Dict[str, Any]] = []
+    for wid in wids:
+        try:
+            p_res = subprocess.run(
+                [
+                    "xprop",
+                    "-id",
+                    wid,
+                    "_NET_WM_STATE",
+                    "_NET_WM_WINDOW_TYPE",
+                    "_NET_FRAME_EXTENTS",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=0.4,
+                check=False,
+            )
+            p_out = p_res.stdout
+        except Exception:
+            continue
+
+        if "_NET_WM_STATE_HIDDEN" in p_out:
+            continue
+        if "_NET_WM_WINDOW_TYPE_DESKTOP" in p_out:
+            continue
+
+        x: Optional[int] = None
+        y: Optional[int] = None
+        w: Optional[int] = None
+        h: Optional[int] = None
+        border = 0
+
+        if has_xwininfo:
+            try:
+                w_res = subprocess.run(
+                    ["xwininfo", "-id", wid],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=0.4,
+                    check=False,
+                )
+                w_out = w_res.stdout
+                if "Map State: IsViewable" not in w_out:
+                    continue
+                mx = re.search(r"Absolute upper-left X:\s+(-?\d+)", w_out)
+                my = re.search(r"Absolute upper-left Y:\s+(-?\d+)", w_out)
+                mw = re.search(r"Width:\s+(\d+)", w_out)
+                mh = re.search(r"Height:\s+(\d+)", w_out)
+                mb = re.search(r"Border width:\s+(\d+)", w_out)
+                if mx and my and mw and mh:
+                    x = int(mx.group(1))
+                    y = int(my.group(1))
+                    w = int(mw.group(1))
+                    h = int(mh.group(1))
+                    border = int(mb.group(1)) if mb else 0
+            except Exception:
+                pass
+
+        if x is None and has_xdotool:
+            try:
+                d_res = subprocess.run(
+                    ["xdotool", "getwindowgeometry", wid],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=0.4,
+                    check=False,
+                )
+                d_out = d_res.stdout
+                mp = re.search(r"Position:\s*(-?\d+),(-?\d+)", d_out)
+                mg = re.search(r"Geometry:\s*(\d+)x(\d+)", d_out)
+                if mp and mg:
+                    x = int(mp.group(1))
+                    y = int(mp.group(2))
+                    w = int(mg.group(1))
+                    h = int(mg.group(2))
+            except Exception:
+                pass
+
+        if x is None or y is None or w is None or h is None or w <= 0 or h <= 0:
+            continue
+
+        # Adjust for window decorations (title bar and borders) using _NET_FRAME_EXTENTS
+        ext = re.search(
+            r"_NET_FRAME_EXTENTS\(CARDINAL\) = (\d+),\s*(\d+),\s*(\d+),\s*(\d+)",
+            p_out,
+        )
+        if ext:
+            left, right, top, bottom = map(int, ext.groups())
+            x -= left
+            y -= top
+            w += left + right
+            h += top + bottom
+        elif border > 0:
+            x -= border
+            y -= border
+            w += border * 2
+            h += border * 2
+
+        results.append({"id": wid, "rect": QRect(x, y, w, h)})
+
+    return results, False
+
+
+def grab_full_screen() -> Tuple[QPixmap, QRect]:
+    """Capture all connected monitors into one composite pixmap covering the virtual desktop."""
+    screens = QGuiApplication.screens()
+    if not screens:
+        return QPixmap(), QRect()
+
+    total_geom = screens[0].geometry()
+    for s in screens[1:]:
+        total_geom = total_geom.united(s.geometry())
+
+    pixmap = QPixmap(total_geom.size())
+    pixmap.fill(Qt.black)
+    painter = QPainter(pixmap)
+    for s in screens:
+        sg = s.geometry()
+        spix = s.grabWindow(0, sg.x(), sg.y(), sg.width(), sg.height())
+        pos = sg.topLeft() - total_geom.topLeft()
+        painter.drawPixmap(pos, spix)
+    painter.end()
+
+    return pixmap, total_geom
+
+
+def get_screenshots_directory() -> Path:
+    """Return the destination folder for saved screenshots, creating it if needed."""
+    override = os.environ.get("WINCLIP_SCREENSHOTS_DIR")
+    if override:
+        p = Path(override).expanduser()
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    pictures_dir = Path.home() / "Pictures"
+    if shutil.which("xdg-user-dir"):
+        try:
+            res = subprocess.run(
+                ["xdg-user-dir", "PICTURES"],
+                capture_output=True,
+                text=True,
+                timeout=1.0,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                pictures_dir = Path(res.stdout.strip())
+        except Exception:
+            pass
+
+    target = pictures_dir / "Screenshots"
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+    except Exception:
+        try:
+            pictures_dir.mkdir(parents=True, exist_ok=True)
+            return pictures_dir
+        except Exception:
+            return Path.home()
+
+
+def save_screenshot_to_file(image: QImage) -> Optional[Path]:
+    """Save captured screenshot into user's PC with a timestamped filename."""
+    try:
+        directory = get_screenshots_directory()
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        candidate = directory / f"Screenshot_{timestamp}.png"
+        counter = 1
+        while candidate.exists():
+            candidate = directory / f"Screenshot_{timestamp}_{counter}.png"
+            counter += 1
+        if image.save(str(candidate), "PNG"):
+            return candidate
+    except Exception as exc:
+        _warn(f"could not save screenshot file: {exc}")
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -2246,6 +2472,295 @@ class CategorySettingsDialog(QDialog):
 
 
 # ---------------------------------------------------------------------------
+# Snip tool and notification widgets
+
+
+class ToastNotification(QWidget):
+    """Sleek 500ms Windows 11 style notification toast."""
+
+    def __init__(
+        self,
+        message: str = "Copied to clipboard",
+        duration_ms: int = 500,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowFlags(
+            Qt.ToolTip
+            | Qt.FramelessWindowHint
+            | Qt.WindowStaysOnTopHint
+            | Qt.WindowDoesNotAcceptFocus
+            | Qt.NoDropShadowWindowHint
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WA_DeleteOnClose, True)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 10, 20, 10)
+        layout.setSpacing(8)
+
+        self.label = QLabel(message, self)
+        label_font = QFont("Segoe UI", 10)
+        label_font.setWeight(QFont.DemiBold)
+        self.label.setFont(label_font)
+        self.label.setStyleSheet("color: #f3f3f3; background: transparent;")
+        layout.addWidget(self.label)
+
+        self.adjustSize()
+        self._position_toast()
+
+        QTimer.singleShot(duration_ms, self.close)
+
+    def _position_toast(self) -> None:
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            geom = screen.geometry()
+            x = geom.x() + (geom.width() - self.width()) // 2
+            y = geom.y() + geom.height() - self.height() - 70
+            self.move(x, y)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        painter.setBrush(QColor("#242424"))
+        painter.setPen(QPen(QColor("#3d3d3d"), 1))
+        painter.drawRoundedRect(rect, 8, 8)
+
+
+class SnipOverlay(QWidget):
+    """Interactive fullscreen screenshot capture overlay with window detection and region drag."""
+
+    def __init__(
+        self,
+        pixmap: QPixmap,
+        total_geom: QRect,
+        windows: List[Dict[str, Any]],
+        detection_failed: bool = False,
+        on_captured: Optional[Callable[[QImage], None]] = None,
+        on_closed: Optional[Callable[[], None]] = None,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self._pixmap = pixmap
+        self._windows = windows
+        self._detection_failed = detection_failed
+        self._on_captured = on_captured
+        self._on_closed = on_closed
+
+        self._press_pos: Optional[QPoint] = None
+        self._current_pos: Optional[QPoint] = None
+        self._is_dragging = False
+        self._hovered_rect: Optional[QRect] = None
+
+        self.setWindowFlags(
+            Qt.WindowStaysOnTopHint
+            | Qt.FramelessWindowHint
+            | Qt.Tool
+            | Qt.NoDropShadowWindowHint
+        )
+        self.setAttribute(Qt.WA_DeleteOnClose, True)
+        self.setCursor(Qt.CrossCursor)
+        self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setGeometry(total_geom)
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if self._on_closed:
+            self._on_closed()
+        super().closeEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() == Qt.Key_Escape:
+            self.close()
+            return
+        super().keyPressEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.RightButton:
+            self.close()
+            return
+        if event.button() == Qt.LeftButton:
+            self._press_pos = event.pos()
+            self._current_pos = event.pos()
+            self._is_dragging = False
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._press_pos is not None:
+            pos = event.pos()
+            if not self._is_dragging:
+                diff = pos - self._press_pos
+                if abs(diff.x()) > 5 or abs(diff.y()) > 5:
+                    self._is_dragging = True
+            if self._is_dragging:
+                self._current_pos = pos
+                self.update()
+        else:
+            self._update_hover(event.pos())
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() != Qt.LeftButton or self._press_pos is None:
+            return
+
+        is_drag = self._is_dragging
+        drag_rect = self._current_selection_rect() if is_drag else QRect()
+        self._press_pos = None
+        self._is_dragging = False
+
+        if is_drag:
+            if drag_rect.width() > 1 and drag_rect.height() > 1:
+                self._finish_capture(drag_rect)
+            else:
+                self.close()
+        else:
+            # Click (5 px or less)
+            if self._detection_failed:
+                self._finish_capture(self.rect())
+                return
+
+            desktop_pt = event.pos() + self.geometry().topLeft()
+            matched = None
+            for w in self._windows:
+                if w["rect"].contains(desktop_pt):
+                    matched = w
+                    break
+
+            if matched is not None:
+                rect = (
+                    matched["rect"]
+                    .translated(-self.geometry().topLeft())
+                    .intersected(self.rect())
+                )
+                if not rect.isEmpty() and rect.width() > 1 and rect.height() > 1:
+                    self._finish_capture(rect)
+                else:
+                    self.close()
+            else:
+                # Landed on desktop or no window found
+                self.close()
+
+    def _update_hover(self, pos: QPoint) -> None:
+        if self._detection_failed:
+            if self._hovered_rect is not None:
+                self._hovered_rect = None
+                self.update()
+            return
+
+        desktop_pt = pos + self.geometry().topLeft()
+        found_rect = None
+        for win in self._windows:
+            if win["rect"].contains(desktop_pt):
+                found_rect = (
+                    win["rect"]
+                    .translated(-self.geometry().topLeft())
+                    .intersected(self.rect())
+                )
+                break
+
+        if self._hovered_rect != found_rect:
+            self._hovered_rect = found_rect
+            self.update()
+
+    def _current_selection_rect(self) -> QRect:
+        if self._press_pos is None or self._current_pos is None:
+            return QRect()
+        x1 = min(self._press_pos.x(), self._current_pos.x())
+        y1 = min(self._press_pos.y(), self._current_pos.y())
+        x2 = max(self._press_pos.x(), self._current_pos.x())
+        y2 = max(self._press_pos.y(), self._current_pos.y())
+        rect = QRect(x1, y1, max(0, x2 - x1), max(0, y2 - y1))
+        return rect.intersected(self.rect())
+
+    def _finish_capture(self, rect: QRect) -> None:
+        clamped = rect.intersected(self.rect())
+        if clamped.isEmpty() or clamped.width() <= 0 or clamped.height() <= 0:
+            self.close()
+            return
+
+        scale_x = self._pixmap.width() / self.width() if self.width() > 0 else 1.0
+        scale_y = self._pixmap.height() / self.height() if self.height() > 0 else 1.0
+
+        crop_rect = QRect(
+            int(clamped.x() * scale_x),
+            int(clamped.y() * scale_y),
+            int(clamped.width() * scale_x),
+            int(clamped.height() * scale_y),
+        )
+        cropped_pixmap = self._pixmap.copy(crop_rect)
+        cropped_image = cropped_pixmap.toImage()
+
+        callback = self._on_captured
+        self.close()
+        if callback is not None:
+            callback(cropped_image)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # 1. Base full screen capture
+        painter.drawPixmap(0, 0, self._pixmap)
+
+        # 2. Determine active undimmed area
+        active_rect = None
+        if self._is_dragging:
+            active_rect = self._current_selection_rect()
+        elif self._hovered_rect is not None:
+            active_rect = self._hovered_rect
+
+        # 3. 40% dimming with cutout
+        dim_path = QPainterPath()
+        dim_path.setFillRule(Qt.OddEvenFill)
+        dim_path.addRect(QRectF(self.rect()))
+        if active_rect is not None and not active_rect.isEmpty():
+            dim_path.addRect(QRectF(active_rect))
+        painter.fillPath(dim_path, QColor(0, 0, 0, 102))
+
+        # 4. Highlight border and live size badge
+        if active_rect is not None and not active_rect.isEmpty():
+            painter.setPen(QPen(QColor("#0078d4"), 2))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(QRectF(active_rect).adjusted(0.5, 0.5, -0.5, -0.5))
+
+            if self._is_dragging:
+                self._draw_size_label(painter, active_rect)
+
+    def _draw_size_label(self, painter: QPainter, rect: QRect) -> None:
+        if rect.width() <= 1 or rect.height() <= 1:
+            return
+        text = f"{rect.width()} × {rect.height()}"
+        label_font = QFont("Segoe UI", 9)
+        label_font.setWeight(QFont.DemiBold)
+        fm = QFontMetrics(label_font)
+        text_w = fm.horizontalAdvance(text)
+        text_h = fm.height()
+        pad_h, pad_v = 10, 4
+        pill_w = text_w + pad_h * 2
+        pill_h = text_h + pad_v * 2
+
+        pill_x = rect.x() + (rect.width() - pill_w) // 2
+        pill_y = rect.bottom() + 8
+        if pill_y + pill_h > self.height() - 8:
+            pill_y = rect.top() - pill_h - 8
+        if pill_y < 8:
+            pill_y = rect.top() + 8
+        if pill_x < 8:
+            pill_x = 8
+        elif pill_x + pill_w > self.width() - 8:
+            pill_x = self.width() - pill_w - 8
+
+        pill_rect = QRectF(pill_x, pill_y, pill_w, pill_h)
+        painter.setPen(QPen(QColor("#3d3d3d"), 1))
+        painter.setBrush(QColor(24, 24, 24, 230))
+        painter.drawRoundedRect(pill_rect, 5, 5)
+
+        painter.setFont(label_font)
+        painter.setPen(QColor("#f3f3f3"))
+        painter.drawText(pill_rect, Qt.AlignCenter, text)
+
+
+# ---------------------------------------------------------------------------
 # Background daemon
 
 
@@ -2266,6 +2781,8 @@ class WinClipDaemon(QObject):
         self.store = HistoryStore(data_directory)
         self.clipboard = app.clipboard()
         self.popup: Optional[ClipboardPopup] = None
+        self.snip_overlay: Optional[SnipOverlay] = None
+        self.toast: Optional[ToastNotification] = None
         self.target_window: Optional[int] = None
         self.target_is_terminal = False
         self._internal_fingerprint: Optional[str] = None
@@ -2344,6 +2861,9 @@ class WinClipDaemon(QObject):
         if command == "show":
             self._reply(client, "ok")
             QTimer.singleShot(0, self.request_show)
+        elif command == "snip":
+            self._reply(client, "ok")
+            QTimer.singleShot(0, self.request_snip)
         elif command == "ping":
             self._reply(client, "ok")
         elif command == "quit":
@@ -2372,6 +2892,46 @@ class WinClipDaemon(QObject):
             self.popup.show_history(self.store.items)
         except Exception as exc:
             _warn(f"could not show clipboard history: {exc}")
+
+    def request_snip(self) -> None:
+        try:
+            if self.popup is not None and self.popup.isVisible():
+                self.popup.hide()
+                self.app.processEvents()
+
+            if self.snip_overlay is not None and self.snip_overlay.isVisible():
+                self.snip_overlay.raise_()
+                self.snip_overlay.activateWindow()
+                return
+
+            pixmap, total_geom = grab_full_screen()
+            windows, failed = query_visible_windows()
+
+            self.snip_overlay = SnipOverlay(
+                pixmap=pixmap,
+                total_geom=total_geom,
+                windows=windows,
+                detection_failed=failed,
+                on_captured=self._on_snip_captured,
+                on_closed=self._on_snip_closed,
+            )
+            self.snip_overlay.show()
+            self.snip_overlay.raise_()
+            self.snip_overlay.activateWindow()
+        except Exception as exc:
+            _warn(f"could not open snip overlay: {exc}")
+
+    def _on_snip_captured(self, image: QImage) -> None:
+        try:
+            save_screenshot_to_file(image)
+            self.clipboard.setImage(image)
+            self.toast = ToastNotification("Copied to clipboard", 500)
+            self.toast.show()
+        except Exception as exc:
+            _warn(f"could not process captured snip: {exc}")
+
+    def _on_snip_closed(self) -> None:
+        self.snip_overlay = None
 
     def _create_popup(self) -> ClipboardPopup:
         popup = ClipboardPopup(self.store.images_dir, self.store.categories)
@@ -2531,6 +3091,19 @@ class WinClipDaemon(QObject):
             except Exception:
                 pass
             self.popup = None
+        if self.snip_overlay is not None:
+            try:
+                self.snip_overlay.hide()
+                self.snip_overlay.close()
+            except Exception:
+                pass
+            self.snip_overlay = None
+        if self.toast is not None:
+            try:
+                self.toast.close()
+            except Exception:
+                pass
+            self.toast = None
         try:
             self.server.close()
         except Exception:
@@ -2546,6 +3119,7 @@ def run_daemon(
     data_directory: Path,
     socket_file: Path,
     instance_lock,
+    snip_initial: bool = False,
 ) -> int:
     """Create the Qt application and enter the event-driven daemon loop."""
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
@@ -2572,6 +3146,8 @@ def run_daemon(
 
     if show_initial:
         QTimer.singleShot(0, daemon.request_show)
+    elif snip_initial:
+        QTimer.singleShot(0, daemon.request_snip)
     return app.exec_()
 
 

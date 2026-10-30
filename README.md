@@ -34,8 +34,10 @@ Traditional Linux clipboard managers (like CopyQ or GPaste) often feature clunky
 | Feature | WinClip | Windows 11 Native | CopyQ | GPaste / Diodon |
 | :--- | :---: | :---: | :---: | :---: |
 | **Windows 11 Fluent Dark UI** | ✅ | ✅ | ❌ | ❌ |
-| **Native <kbd>Win</kbd>+<kbd>V</kbd> Shortcut** | ✅ | ✅ | ⚠️ *Configurable* | ⚠️ *Configurable* |
+| **Native <kbd>Win</kbd>+<kbd>V</kbd> Clipboard History** | ✅ | ✅ | ⚠️ *Configurable* | ⚠️ *Configurable* |
+| **Native <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> Screen Snip** | ✅ | ✅ | ❌ | ❌ |
 | **0% Idle CPU (Event-Driven)** | ✅ | ✅ | ⚠️ *Heavy* | ✅ |
+| **Window & Region Screen Capture** | ✅ | ✅ | ❌ | ❌ |
 | **Text & Image Previews** | ✅ | ✅ | ✅ | ⚠️ *Varies* |
 | **Pinned Items & Categories** | ✅ | ⚠️ *Pin only* | ✅ | ❌ |
 | **Drag & Drop Reordering** | ✅ | ❌ | ✅ | ❌ |
@@ -48,7 +50,8 @@ Traditional Linux clipboard managers (like CopyQ or GPaste) often feature clunky
 ## ✨ Key Features
 
 - **🪟 Windows 11 Fluent Experience**: Floating popup centered directly over your cursor or text caret with smooth scroll physics and instant search/navigation.
-- **🖼️ Rich Text & Images**: Automatically captures formatted text, URLs, code blocks, and images with high-DPI thumbnails and dimensions.
+- **✂️ Windows 11 Snip Tool (<kbd>Shift</kbd>+<kbd>Super</kbd>+<kbd>S</kbd>)**: Instant screen capture with dimmed overlay, live window detection on hover, interactive rectangle drag with size indicators, auto-save to `~/Pictures/Screenshots`, and instant copy to clipboard.
+- **🖼️ Rich Text & Images**: Automatically captures formatted text, URLs, code blocks, and images with borderless high-DPI thumbnails.
 - **📌 Pinned Clips**: Important snippets never expire (unlike the 25-item recent history).
 - **🏷️ Customizable Categories**: Filter pinned items by category tabs (*TG*, *VK*, *Insta*, *Work*, *Templates*).
 - **🔀 Reorder Pinned Items**: Reorder pinned clips with drag-and-drop or <kbd>Ctrl</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd>.
@@ -85,34 +88,42 @@ The script will:
 
 ---
 
-## ⌨️ Setting up the <kbd>Win</kbd> + <kbd>V</kbd> Shortcut
+## ⌨️ Desktop Shortcuts Setup
 
 ### Linux Mint (Cinnamon)
 1. Open **Menu > Keyboard > Shortcuts**.
-2. Select **Custom Shortcuts** and click **Add custom shortcut**.
-3. Enter:
-   - **Name**: `WinClip`
-   - **Command**: `winclip show`
-4. Click the keyboard binding cell and press <kbd>Super</kbd> + <kbd>V</kbd> (or <kbd>Win</kbd> + <kbd>V</kbd>).
+2. Select **Custom Shortcuts** and configure:
+   - **Clipboard History**:
+     - **Name**: `WinClip`
+     - **Command**: `winclip show`
+     - **Key**: <kbd>Super</kbd> + <kbd>V</kbd>
+   - **Snipping Tool**:
+     - **Name**: `WinClip Snip`
+     - **Command**: `winclip snip`
+     - **Key**: <kbd>Shift</kbd> + <kbd>Super</kbd> + <kbd>S</kbd>
 
 ### GNOME (Ubuntu, Fedora, Debian)
 1. Open **Settings > Keyboard > Keyboard Shortcuts > Custom Shortcuts**.
-2. Click **+** to add a new shortcut:
-   - **Name**: `WinClip`
-   - **Command**: `winclip show`
-   - **Shortcut**: <kbd>Super</kbd> + <kbd>V</kbd>
+2. Add shortcuts:
+   - `winclip show` mapped to <kbd>Super</kbd> + <kbd>V</kbd>
+   - `winclip snip` mapped to <kbd>Shift</kbd> + <kbd>Super</kbd> + <kbd>S</kbd>
 
 ### XFCE / KDE Plasma
-- Under **Keyboard Settings > Application Shortcuts**, map `winclip show` to <kbd>Super</kbd> + <kbd>V</kbd>.
+- Map `winclip show` to <kbd>Super</kbd> + <kbd>V</kbd> and `winclip snip` to <kbd>Shift</kbd> + <kbd>Super</kbd> + <kbd>S</kbd> in Application Shortcuts.
 
 ---
 
-## 🎮 Keyboard Controls
+## 🎮 Keyboard & Mouse Controls
 
-| Key | Action |
+| Key / Gesture | Action |
 | :--- | :--- |
 | <kbd>Super</kbd> + <kbd>V</kbd> | Open clipboard history popup near cursor |
-| <kbd>↑</kbd> / <kbd>↓</kbd> | Navigate clips |
+| <kbd>Shift</kbd> + <kbd>Super</kbd> + <kbd>S</kbd> | Launch interactive screen snip tool |
+| **Hover (in Snip)** | Highlight window under cursor with blue border |
+| **Click (in Snip)** | Capture window under cursor (including decorations) |
+| **Drag > 5px (in Snip)** | Crop custom rectangle with live dimensions badge |
+| <kbd>Esc</kbd> / **Right Click** | Cancel screen snip without capturing |
+| <kbd>↑</kbd> / <kbd>↓</kbd> | Navigate clipboard history clips |
 | <kbd>←</kbd> / <kbd>→</kbd> | Switch between category tabs |
 | <kbd>Enter</kbd> | Paste selected clip into active application |
 | <kbd>Ctrl</kbd> + <kbd>P</kbd> | Pin / unpin selected clip |

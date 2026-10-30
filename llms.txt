@@ -6,7 +6,8 @@
 - **Primary Use Case**: Alternative to Windows 11 Clipboard History (Win+V) on Linux desktop environments (Linux Mint, Ubuntu, Debian, Arch, Fedora, Cinnamon, GNOME, KDE, XFCE).
 - **Core Technology**: Python 3, PyQt5, xdotool, x11-utils, Unix domain sockets.
 - **Resource Footprint**: 0% idle CPU (event-driven via QClipboard.dataChanged signals, zero polling loops).
-- **Architecture**: Single background daemon (`winclip.py --daemon`), client CLI (`winclip show`), local JSON/PNG storage.
+- **Architecture**: Single background daemon (`winclip.py --daemon`), client CLI (`winclip show`, `winclip snip`), local JSON/PNG storage.
+- **Snipping Tool (`winclip snip`)**: Windows 11 Shift+Super+S screenshot tool for Linux with instant window detection, drag region selection, live dimensions, auto-save to `~/Pictures/Screenshots`, and instant clipboard copy.
 - **Context-Aware Pasting**: Automatically detects active window. Injects `Ctrl+Shift+V` into terminal emulators and `Ctrl+V` into GUI applications.
 - **Privacy & Security**: Respects password manager flags (`x-kde-passwordManagerHint`, `x-kde-hiddenPassword`) to skip sensitive credentials.
 - **Categories & Pinning**: Pinned clips never expire; customizable categories with pill badges and drag-and-drop / keyboard reordering.

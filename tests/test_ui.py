@@ -16,8 +16,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 try:
-    from PyQt5.QtCore import QMimeData, Qt
-    from PyQt5.QtGui import QColor, QImage
+    from PyQt5.QtCore import QEvent, QMimeData, QPoint, QRect, Qt
+    from PyQt5.QtGui import QColor, QImage, QMouseEvent, QPixmap
     from PyQt5.QtTest import QTest
     from PyQt5.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit
 except ImportError as exc:  # pragma: no cover
@@ -29,9 +29,13 @@ from winclip_app import (  # noqa: E402
     MAX_PANEL_HEIGHT,
     MAX_SCROLL_HEIGHT,
     PANEL_WIDTH,
+    SnipOverlay,
+    ToastNotification,
     encode_clipboard_image,
     is_terminal_class,
     mime_is_sensitive,
+    query_visible_windows,
+    save_screenshot_to_file,
 )
 from winclip_store import HistoryStore  # noqa: E402
 
@@ -373,6 +377,221 @@ class UiTests(unittest.TestCase):
         self.assertFalse(mime_is_sensitive(mime))
         mime.setData("x-kde-passwordManagerHint", b"secret")
         self.assertTrue(mime_is_sensitive(mime))
+
+    def test_toast_notification(self) -> None:
+        toast = ToastNotification("Copied to clipboard", duration_ms=50)
+        self.assertIn("Copied to clipboard", toast.label.text())
+        self.assertTrue(bool(toast.windowFlags() & Qt.ToolTip))
+        self.assertTrue(bool(toast.windowFlags() & Qt.WindowStaysOnTopHint))
+        toast.show()
+        self.app.processEvents()
+        toast.close()
+        toast.deleteLater()
+        self.app.processEvents()
+
+    def test_query_visible_windows_structure(self) -> None:
+        windows, failed = query_visible_windows()
+        self.assertIsInstance(windows, list)
+        self.assertIsInstance(failed, bool)
+        for win in windows:
+            self.assertIn("id", win)
+            self.assertIn("rect", win)
+            self.assertIsInstance(win["rect"], QRect)
+
+    def test_save_screenshot_to_file(self) -> None:
+        img = QImage(100, 100, QImage.Format_ARGB32)
+        img.fill(QColor(255, 0, 0))
+        target_dir = self.data / "Screenshots"
+        os.environ["WINCLIP_SCREENSHOTS_DIR"] = str(target_dir)
+        try:
+            path = save_screenshot_to_file(img)
+            self.assertIsNotNone(path)
+            self.assertTrue(path.exists())
+            self.assertTrue(path.name.startswith("Screenshot_"))
+            self.assertTrue(path.name.endswith(".png"))
+        finally:
+            os.environ.pop("WINCLIP_SCREENSHOTS_DIR", None)
+
+    def test_snip_overlay_drag_capture(self) -> None:
+        pix = QPixmap(800, 600)
+        pix.fill(QColor(10, 20, 30))
+        geom = QRect(0, 0, 800, 600)
+        captured = []
+
+        overlay = SnipOverlay(
+            pixmap=pix,
+            total_geom=geom,
+            windows=[],
+            detection_failed=False,
+            on_captured=lambda img: captured.append(img),
+        )
+        overlay.show()
+        self.app.processEvents()
+        self.assertEqual(overlay.cursor().shape(), Qt.CrossCursor)
+
+        # Press at (50, 50) and drag to (250, 150) -> 200x100
+        QTest.mousePress(overlay, Qt.LeftButton, pos=QPoint(50, 50))
+        self.app.processEvents()
+        self.assertFalse(overlay._is_dragging)
+
+        move_ev = QMouseEvent(
+            QEvent.MouseMove,
+            QPoint(250, 150),
+            Qt.NoButton,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        )
+        self.app.sendEvent(overlay, move_ev)
+        self.app.processEvents()
+        self.assertTrue(overlay._is_dragging)
+        self.assertEqual(overlay._current_selection_rect(), QRect(50, 50, 200, 100))
+
+        QTest.mouseRelease(overlay, Qt.LeftButton, pos=QPoint(250, 150))
+        self.app.processEvents()
+
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0].width(), 200)
+        self.assertEqual(captured[0].height(), 100)
+
+    def test_snip_overlay_window_click(self) -> None:
+        pix = QPixmap(800, 600)
+        pix.fill(QColor(10, 20, 30))
+        geom = QRect(0, 0, 800, 600)
+        windows = [{"id": "0x123", "rect": QRect(100, 80, 400, 300)}]
+        captured = []
+
+        overlay = SnipOverlay(
+            pixmap=pix,
+            total_geom=geom,
+            windows=windows,
+            detection_failed=False,
+            on_captured=lambda img: captured.append(img),
+        )
+        overlay.show()
+        self.app.processEvents()
+
+        # Click inside the window frame without dragging (diff <= 5px)
+        QTest.mousePress(overlay, Qt.LeftButton, pos=QPoint(200, 200))
+        QTest.mouseRelease(overlay, Qt.LeftButton, pos=QPoint(202, 201))
+        self.app.processEvents()
+
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0].width(), 400)
+        self.assertEqual(captured[0].height(), 300)
+
+    def test_snip_overlay_desktop_click_closes_without_capture(self) -> None:
+        pix = QPixmap(800, 600)
+        pix.fill(QColor(10, 20, 30))
+        geom = QRect(0, 0, 800, 600)
+        windows = [{"id": "0x123", "rect": QRect(100, 80, 400, 300)}]
+        captured = []
+
+        overlay = SnipOverlay(
+            pixmap=pix,
+            total_geom=geom,
+            windows=windows,
+            detection_failed=False,
+            on_captured=lambda img: captured.append(img),
+        )
+        overlay.show()
+        self.app.processEvents()
+
+        # Click outside window (e.g. at 20, 20)
+        QTest.mousePress(overlay, Qt.LeftButton, pos=QPoint(20, 20))
+        QTest.mouseRelease(overlay, Qt.LeftButton, pos=QPoint(20, 20))
+        self.app.processEvents()
+
+        self.assertEqual(len(captured), 0)
+
+    def test_snip_overlay_escape_cancels(self) -> None:
+        pix = QPixmap(800, 600)
+        geom = QRect(0, 0, 800, 600)
+        captured = []
+
+        overlay = SnipOverlay(
+            pixmap=pix,
+            total_geom=geom,
+            windows=[],
+            detection_failed=False,
+            on_captured=lambda img: captured.append(img),
+        )
+        overlay.show()
+        self.app.processEvents()
+
+        QTest.keyClick(overlay, Qt.Key_Escape)
+        self.app.processEvents()
+
+        self.assertEqual(len(captured), 0)
+
+    def test_snip_overlay_right_click_cancels(self) -> None:
+        pix = QPixmap(800, 600)
+        geom = QRect(0, 0, 800, 600)
+        captured = []
+
+        overlay = SnipOverlay(
+            pixmap=pix,
+            total_geom=geom,
+            windows=[],
+            detection_failed=False,
+            on_captured=lambda img: captured.append(img),
+        )
+        overlay.show()
+        self.app.processEvents()
+
+        QTest.mousePress(overlay, Qt.RightButton, pos=QPoint(100, 100))
+        self.app.processEvents()
+
+        self.assertEqual(len(captured), 0)
+
+    def test_snip_overlay_fallback_when_detection_fails(self) -> None:
+        pix = QPixmap(800, 600)
+        pix.fill(QColor(40, 50, 60))
+        geom = QRect(0, 0, 800, 600)
+        captured = []
+
+        overlay = SnipOverlay(
+            pixmap=pix,
+            total_geom=geom,
+            windows=[],
+            detection_failed=True,
+            on_captured=lambda img: captured.append(img),
+        )
+        overlay.show()
+        self.app.processEvents()
+
+        # When detection fails, plain click captures entire screen
+        QTest.mousePress(overlay, Qt.LeftButton, pos=QPoint(50, 50))
+        QTest.mouseRelease(overlay, Qt.LeftButton, pos=QPoint(50, 50))
+        self.app.processEvents()
+
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0].width(), 800)
+        self.assertEqual(captured[0].height(), 600)
+
+    def test_snip_overlay_hover_tracking(self) -> None:
+        pix = QPixmap(800, 600)
+        geom = QRect(0, 0, 800, 600)
+        windows = [{"id": "0x123", "rect": QRect(100, 80, 400, 300)}]
+
+        overlay = SnipOverlay(
+            pixmap=pix,
+            total_geom=geom,
+            windows=windows,
+            detection_failed=False,
+        )
+        overlay.show()
+        self.app.processEvents()
+
+        # Hover outside
+        overlay._update_hover(QPoint(20, 20))
+        self.assertIsNone(overlay._hovered_rect)
+
+        # Hover inside window
+        overlay._update_hover(QPoint(150, 150))
+        self.assertEqual(overlay._hovered_rect, QRect(100, 80, 400, 300))
+
+        overlay.close()
+        self.app.processEvents()
 
 
 if __name__ == "__main__":

@@ -95,11 +95,19 @@ cat <<'EOF'
 
 WinClip is installed.
 
-Set the shortcut in Cinnamon:
+Set the shortcuts in Cinnamon / your desktop environment:
   Menu > Keyboard > Shortcuts > Custom Shortcuts
-  Add:  Name: WinClip    Command: winclip show
-  Bind it to Super+V.
 
-Then press Super+V. See ~/.local/share/winclip/README.md for details,
-including how to check whether Super+V is already in use.
+  1. Clipboard History:
+     Name:    WinClip History
+     Command: winclip show
+     Key:     Super+V
+
+  2. Screen Snipping Tool:
+     Name:    WinClip Snip
+     Command: winclip snip
+     Key:     Shift+Super+S
+
+Then press Super+V or Shift+Super+S. See ~/.local/share/winclip/README.md
+for complete details, custom settings, and keyboard navigation.
 EOF
