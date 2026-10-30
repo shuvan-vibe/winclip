@@ -94,6 +94,7 @@ try:
         conf = {
             'custom0': ('WinClip Snip', '$LAUNCHER snip', \"['<Super><Shift>s', '<Shift><Super>s']\"),
             'custom1': ('WinClip', '$LAUNCHER show', \"['<Super>v']\"),
+            'custom2': ('WinClip Full Shot', '$LAUNCHER shot', \"['<Primary>z', '<Control>z']\"),
         }
         for k, (name, cmd, bind) in conf.items():
             if k not in lst: lst.append(k)
@@ -133,6 +134,11 @@ Set the shortcuts in Cinnamon / your desktop environment:
      Command: winclip snip
      Key:     Shift+Super+S
 
-Then press Super+V or Shift+Super+S. See ~/.local/share/winclip/README.md
+  3. Full-Screen Instant Shot (Save only, no clipboard):
+     Name:    WinClip Full Shot
+     Command: winclip shot
+     Key:     Ctrl+Z
+
+Then press Super+V, Shift+Super+S, or Ctrl+Z. See ~/.local/share/winclip/README.md
 for complete details, custom settings, and keyboard navigation.
 EOF
