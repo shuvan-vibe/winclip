@@ -27,3 +27,4 @@ cd winclip
 - **CopyQ**: Powerful scripting but heavy, complex multi-tab UI. WinClip is minimalist, matches Windows 11 Fluent dark design, and focuses on quick Win+V paste speed.
 - **GPaste / Diodon**: Often restricted to GNOME or GTK applets, lacks category tagging, inline image thumbnails, and terminal-aware paste switching.
 - **Greenclip**: Rofi-dependent, text-focused, no category management or visual thumbnail cards.
+

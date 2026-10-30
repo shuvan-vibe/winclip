@@ -496,18 +496,19 @@ class TextPreview(QWidget):
 
 
 class ImagePreview(QWidget):
-    """Rounded, aspect-fit thumbnail loaded at display size (never full size)."""
+    """Aspect-fit image thumbnail displayed directly without borders or letterboxes."""
 
-    THUMB_WIDTH = 236
-    THUMB_HEIGHT = 80
+    MAX_WIDTH = 240
+    MAX_HEIGHT = 80
 
     def __init__(self, path: Optional[Path], parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._pixmap: Optional[QPixmap] = None
-        self.setFixedSize(self.THUMB_WIDTH, self.THUMB_HEIGHT)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         if path is not None:
             self._load(path)
+        else:
+            self.setFixedSize(110, 48)
 
     def _load(self, path: Path) -> None:
         try:
@@ -515,42 +516,34 @@ class ImagePreview(QWidget):
             reader.setAutoTransform(True)
             size = reader.size()
             if size.isValid() and size.width() > 0 and size.height() > 0:
-                scaled = size.scaled(
-                    QSize(self.THUMB_WIDTH, self.THUMB_HEIGHT), Qt.KeepAspectRatio
+                scaled_size = size.scaled(
+                    QSize(self.MAX_WIDTH, self.MAX_HEIGHT), Qt.KeepAspectRatio
                 )
-                reader.setScaledSize(scaled)
-            image = reader.read()
-            if not image.isNull():
-                self._pixmap = QPixmap.fromImage(image)
+                reader.setScaledSize(scaled_size)
+                image = reader.read()
+                if not image.isNull():
+                    self._pixmap = QPixmap.fromImage(image)
+                    self.setFixedSize(scaled_size)
+                    return
         except Exception:
-            self._pixmap = None
+            pass
+        self._pixmap = None
+        self.setFixedSize(110, 48)
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        outer = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        painter.setPen(QPen(QColor("#333333"), 1))
-        painter.setBrush(QColor("#1b1b1b"))
-        painter.drawRoundedRect(outer, 6, 6)
         if self._pixmap is None:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
             painter.setPen(QColor(COLOR_MUTED))
             painter.drawText(self.rect(), Qt.AlignCenter, "Image unavailable")
             return
-        scaled = self._pixmap.size().scaled(
-            QSize(self.THUMB_WIDTH - 4, self.THUMB_HEIGHT - 4), Qt.KeepAspectRatio
-        )
-        target = QRectF(
-            (self.width() - scaled.width()) / 2.0,
-            (self.height() - scaled.height()) / 2.0,
-            scaled.width(),
-            scaled.height(),
-        )
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
         clip = QPainterPath()
-        clip.addRoundedRect(outer.adjusted(1, 1, -1, -1), 5, 5)
-        painter.save()
+        clip.addRoundedRect(QRectF(self.rect()), 6, 6)
         painter.setClipPath(clip)
-        painter.drawPixmap(target, self._pixmap, QRectF(self._pixmap.rect()))
-        painter.restore()
+        painter.drawPixmap(0, 0, self._pixmap)
 
 
 class ClipCard(QWidget):
@@ -596,7 +589,7 @@ class ClipCard(QWidget):
             preview = ImagePreview(image_path, self)
             preview.setToolTip(f"{item.get('width', '?')} × {item.get('height', '?')}")
             row.addWidget(preview, 0, Qt.AlignVCenter)
-            card_height = ImagePreview.THUMB_HEIGHT + 18
+            card_height = max(preview.height() + 18, 54)
         else:
             preview = TextPreview(str(item.get("text", "")), font, self)
             row.addWidget(preview, 0, Qt.AlignVCenter)
