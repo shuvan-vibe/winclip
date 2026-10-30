@@ -80,27 +80,27 @@ PANEL_WIDTH = 360
 SHADOW_MARGIN = 16
 MAX_PANEL_HEIGHT = 480
 MAX_SCROLL_HEIGHT = 360
-CARD_RADIUS = 6
-PANEL_RADIUS = 8
+CARD_RADIUS = 8
+PANEL_RADIUS = 12
 PREVIEW_WIDTH = 226
 ACTION_AREA_WIDTH = 54
 PASTE_DELAY_MS = 85
 
-COLOR_PANEL = "#2b2b2b"
-COLOR_CARD = "#363636"
-COLOR_CARD_HOVER = "#404040"
-COLOR_CARD_SELECTED = "#424242"
-COLOR_TEXT = "#ececec"
-COLOR_MUTED = "#9b9b9b"
-COLOR_ACCENT = "#7db9ff"
-COLOR_BORDER = "#414141"
+COLOR_PANEL = "#202020"
+COLOR_CARD = "#2a2a2a"
+COLOR_CARD_HOVER = "#323232"
+COLOR_CARD_SELECTED = "#363636"
+COLOR_TEXT = "#f2f2f2"
+COLOR_MUTED = "#8e8e8e"
+COLOR_ACCENT = "#4cc2ff"
+COLOR_BORDER = "#333333"
 
-PEN_CARD_BORDER = QPen(QColor(COLOR_CARD), 1)
-PEN_CARD_HOVER_BORDER = QPen(QColor("#474747"), 1)
-PEN_CARD_SEL_BORDER = QPen(QColor("#5f5f5f"), 1)
-BRUSH_CARD = QBrush(QColor(COLOR_CARD))
-BRUSH_CARD_HOVER = QBrush(QColor(COLOR_CARD_HOVER))
-BRUSH_CARD_SEL = QBrush(QColor(COLOR_CARD_SELECTED))
+PEN_CARD_BORDER = QPen(QColor("#333333"), 1)
+PEN_CARD_HOVER_BORDER = QPen(QColor("#444444"), 1)
+PEN_CARD_SEL_BORDER = QPen(QColor("#525252"), 1)
+BRUSH_CARD = QBrush(QColor("#2a2a2a"))
+BRUSH_CARD_HOVER = QBrush(QColor("#323232"))
+BRUSH_CARD_SEL = QBrush(QColor("#363636"))
 
 TERMINAL_TOKENS = {
     "alacritty",
@@ -363,42 +363,44 @@ class ActionButton(QAbstractButton):
         painter.setRenderHint(QPainter.Antialiasing)
         if self.underMouse() or self.isDown():
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(255, 255, 255, 26 if self.underMouse() else 40))
-            painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 4, 4)
+            painter.setBrush(QColor(255, 255, 255, 24 if self.underMouse() else 38))
+            painter.drawEllipse(QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5))
 
-        color = QColor("#ffffff") if self.underMouse() else QColor("#c9c9c9")
         if self.kind == "pin":
-            color = QColor(COLOR_ACCENT)
+            color = QColor(COLOR_ACCENT) if (self._filled or self.underMouse()) else QColor("#a8a8a8")
+        else:
+            color = QColor("#ff6b6b") if self.underMouse() else QColor("#a8a8a8")
+
         painter.save()
         painter.translate(self.width() / 2.0, self.height() / 2.0)
         if self.kind == "pin":
             painter.rotate(45)
             path = QPainterPath()
-            path.moveTo(-4.2, -8.0)
-            path.lineTo(4.2, -8.0)
-            path.lineTo(4.2, -5.2)
-            path.lineTo(2.0, -5.2)
+            path.moveTo(-4.0, -7.5)
+            path.lineTo(4.0, -7.5)
+            path.lineTo(4.0, -4.8)
+            path.lineTo(2.0, -4.8)
             path.lineTo(2.0, 1.0)
-            path.lineTo(4.2, 3.0)
-            path.lineTo(4.2, 4.2)
-            path.lineTo(-4.2, 4.2)
-            path.lineTo(-4.2, 3.0)
+            path.lineTo(4.0, 3.0)
+            path.lineTo(4.0, 4.0)
+            path.lineTo(-4.0, 4.0)
+            path.lineTo(-4.0, 3.0)
             path.lineTo(-2.0, 1.0)
-            path.lineTo(-2.0, -5.2)
-            path.lineTo(-4.2, -5.2)
+            path.lineTo(-2.0, -4.8)
+            path.lineTo(-4.0, -4.8)
             path.closeSubpath()
-            painter.setPen(QPen(color, 1.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            painter.setPen(QPen(color, 1.3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
             if self._filled:
                 painter.setBrush(color)
             else:
                 painter.setBrush(Qt.NoBrush)
             painter.drawPath(path)
-            painter.drawLine(QPointF(0, 4.2), QPointF(0, 9.0))
+            painter.drawLine(QPointF(0, 4.0), QPointF(0, 8.5))
         else:
-            pen = QPen(color, 1.7, Qt.SolidLine, Qt.RoundCap)
+            pen = QPen(color, 1.5, Qt.SolidLine, Qt.RoundCap)
             painter.setPen(pen)
-            painter.drawLine(QPointF(-4.5, -4.5), QPointF(4.5, 4.5))
-            painter.drawLine(QPointF(4.5, -4.5), QPointF(-4.5, 4.5))
+            painter.drawLine(QPointF(-4.0, -4.0), QPointF(4.0, 4.0))
+            painter.drawLine(QPointF(4.0, -4.0), QPointF(-4.0, 4.0))
         painter.restore()
 
 
@@ -707,6 +709,18 @@ class ClipCard(QWidget):
 
         painter.drawRoundedRect(rect, CARD_RADIUS, CARD_RADIUS)
 
+        if self._selected:
+            # Signature Windows 11 vertical accent pill on left edge
+            indicator_h = min(16.0, rect.height() * 0.45)
+            indicator_w = 3.0
+            indicator_x = rect.left() + 2.0
+            indicator_y = rect.top() + (rect.height() - indicator_h) / 2.0
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(COLOR_ACCENT))
+            painter.drawRoundedRect(
+                QRectF(indicator_x, indicator_y, indicator_w, indicator_h), 1.5, 1.5
+            )
+
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.LeftButton:
             self._drag_origin = event.pos()
@@ -992,53 +1006,70 @@ class ClipboardPopup(QWidget):
                 border-radius: {PANEL_RADIUS}px;
             }}
             QLabel#titleLabel {{
-                color: #f3f3f3;
+                color: #ffffff;
                 font-size: 13pt;
                 font-weight: 600;
             }}
-            QToolButton#clearButton,
+            QToolButton#clearButton {{
+                color: {COLOR_MUTED};
+                background-color: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 4px;
+                padding: 2px 8px;
+                font-size: 8.5pt;
+                font-weight: 500;
+            }}
+            QToolButton#clearButton:hover {{
+                color: #ffffff;
+                background-color: rgba(255, 255, 255, 0.12);
+                border-color: rgba(255, 255, 255, 0.15);
+            }}
+            QToolButton#clearButton:pressed {{
+                background-color: rgba(255, 255, 255, 0.08);
+            }}
+            QToolButton#clearButton:disabled {{
+                color: #555555;
+                background-color: transparent;
+                border-color: transparent;
+            }}
             QToolButton#settingsButton {{
                 color: {COLOR_MUTED};
                 background: transparent;
                 border: none;
-                border-radius: 4px;
-                padding: 3px 6px;
-                font-size: 9pt;
+                border-radius: 6px;
+                padding: 4px;
             }}
-            QToolButton#settingsButton {{
-                padding: 3px;
-            }}
-            QToolButton#clearButton:hover,
             QToolButton#settingsButton:hover {{
                 color: #ffffff;
-                background: #3d3d3d;
+                background-color: rgba(255, 255, 255, 0.10);
             }}
-            QToolButton#clearButton:pressed,
             QToolButton#settingsButton:pressed {{
-                background: #474747;
-            }}
-            QToolButton#clearButton:disabled {{
-                color: #656565;
+                background-color: rgba(255, 255, 255, 0.06);
             }}
             QTabBar#categoryTabs {{
                 background: transparent;
             }}
             QTabBar#categoryTabs::tab {{
-                color: #b9b9b9;
-                background-color: #333333;
-                border: 1px solid #454545;
-                border-radius: 9px;
-                padding: 3px 10px;
-                margin-right: 5px;
+                color: #c4c4c4;
+                background-color: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 12px;
+                padding: 3px 12px;
+                margin-right: 6px;
                 min-width: 0;
+                font-size: 9pt;
+                font-weight: 500;
             }}
             QTabBar#categoryTabs::tab:selected {{
                 color: #ffffff;
-                background-color: #3f6f9f;
-                border-color: #5d86aa;
+                background-color: #0078d4;
+                border: 1px solid #1a88e1;
+                font-weight: 600;
             }}
             QTabBar#categoryTabs::tab:hover:!selected {{
-                background-color: #3d3d3d;
+                color: #ffffff;
+                background-color: rgba(255, 255, 255, 0.10);
+                border-color: rgba(255, 255, 255, 0.14);
             }}
             QTabBar#categoryTabs QToolButton {{
                 background: transparent;
@@ -1046,16 +1077,16 @@ class ClipboardPopup(QWidget):
             }}
             QScrollBar:vertical {{
                 background: transparent;
-                width: 6px;
-                margin: 0;
+                width: 5px;
+                margin: 2px 1px 2px 0;
             }}
             QScrollBar::handle:vertical {{
-                background: #5a5a5a;
+                background: rgba(255, 255, 255, 0.22);
                 min-height: 24px;
-                border-radius: 3px;
+                border-radius: 2.5px;
             }}
             QScrollBar::handle:vertical:hover {{
-                background: #757575;
+                background: rgba(255, 255, 255, 0.38);
             }}
             QScrollBar::add-line:vertical,
             QScrollBar::sub-line:vertical {{
@@ -1067,26 +1098,29 @@ class ClipboardPopup(QWidget):
                 background: transparent;
             }}
             QToolTip {{
-                color: #efefef;
-                background-color: #1e1e1e;
-                border: 1px solid #4a4a4a;
-                padding: 4px;
+                color: #f0f0f0;
+                background-color: #2b2b2b;
+                border: 1px solid #454545;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 9pt;
             }}
             """
         )
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        # Hand-painted soft shadow: cheaper and more predictable than a
-        # QGraphicsDropShadowEffect on a window that appears on demand.
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         panel_rect = QRectF(self.panel.geometry())
         painter.setPen(Qt.NoPen)
-        for step in range(12, 0, -1):
+        for step in range(16, 0, -1):
             spread = float(step)
-            alpha = max(3, 16 - step)
+            norm = (17 - step) / 16.0
+            alpha = int(22 * (norm ** 2.2))
+            if alpha <= 0:
+                continue
             shadow_rect = panel_rect.adjusted(
-                -spread, -spread + 3.0, spread, spread + 3.0
+                -spread, -spread + 3.5, spread, spread + 3.5
             )
             painter.setBrush(QColor(0, 0, 0, alpha))
             painter.drawRoundedRect(
@@ -1393,12 +1427,12 @@ class ClipboardPopup(QWidget):
         row = QWidget(self.content)
         row.setObjectName("recentHeaderRow")
         layout = QHBoxLayout(row)
-        layout.setContentsMargins(4, 2, 0, 2)
+        layout.setContentsMargins(4, 4, 2, 4)
         layout.setSpacing(0)
 
         label = QLabel("Recent", row)
         label.setStyleSheet(
-            f"color: {COLOR_MUTED}; font-size: 9pt; font-weight: 600;"
+            f"color: {COLOR_MUTED}; font-size: 8.5pt; font-weight: 600; letter-spacing: 0.5px;"
         )
         layout.addWidget(label, 0, Qt.AlignVCenter)
         layout.addStretch(1)
@@ -1411,9 +1445,9 @@ class ClipboardPopup(QWidget):
 
     def _section_label(self, text: str, tooltip: str = "") -> QLabel:
         label = QLabel(text, self.content)
-        label.setContentsMargins(4, 1, 0, 0)
+        label.setContentsMargins(4, 4, 0, 2)
         label.setStyleSheet(
-            f"color: {COLOR_MUTED}; font-size: 9pt; font-weight: 600;"
+            f"color: {COLOR_MUTED}; font-size: 8.5pt; font-weight: 600; letter-spacing: 0.5px;"
         )
         if tooltip:
             label.setToolTip(tooltip)
@@ -1732,12 +1766,12 @@ class CategoryItemDelegate(QStyledItemDelegate):
         # Background selection / hover highlight
         if is_selected:
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor("#3f6f9f"))
-            painter.drawRoundedRect(rect.adjusted(3, 1, -3, -1), 4, 4)
+            painter.setBrush(QColor("#0078d4"))
+            painter.drawRoundedRect(rect.adjusted(3, 1, -3, -1), 6, 6)
         elif is_hovered:
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor("#2c2c2c"))
-            painter.drawRoundedRect(rect.adjusted(3, 1, -3, -1), 4, 4)
+            painter.drawRoundedRect(rect.adjusted(3, 1, -3, -1), 6, 6)
 
         # Data
         name = str(index.data(Qt.UserRole) or index.data(Qt.DisplayRole) or "")
@@ -1746,7 +1780,7 @@ class CategoryItemDelegate(QStyledItemDelegate):
             count = 0
 
         # Colors & Font
-        text_color = QColor("#ffffff") if is_selected else QColor("#ececec")
+        text_color = QColor("#ffffff") if is_selected else QColor("#f0f0f0")
         font = painter.font()
         font.setPointSize(9)
         font.setWeight(QFont.DemiBold if is_selected else QFont.Normal)
@@ -1780,7 +1814,7 @@ class CategoryItemDelegate(QStyledItemDelegate):
 
             # Badge text
             painter.setFont(badge_font)
-            badge_fg = QColor("#ffffff") if is_selected else QColor("#b0b0b0")
+            badge_fg = QColor("#ffffff") if is_selected else QColor("#9e9e9e")
             painter.setPen(badge_fg)
             painter.drawText(badge_rect, Qt.AlignCenter, badge_text)
 
@@ -1810,10 +1844,10 @@ class CategorySettingsDialog(QDialog):
         self.setStyleSheet(
             """
             QDialog {
-                background-color: #2b2b2b;
+                background-color: #202020;
             }
             QLabel {
-                color: #ececec;
+                color: #f0f0f0;
             }
             QLabel#sectionTitle {
                 font-size: 11pt;
@@ -1821,60 +1855,60 @@ class CategorySettingsDialog(QDialog):
                 color: #ffffff;
             }
             QLabel#hint {
-                color: #a0a0a0;
+                color: #8e8e8e;
                 font-size: 9pt;
             }
             QListWidget {
-                background-color: #202020;
-                color: #ececec;
-                border: 1px solid #3c3c3c;
-                border-radius: 6px;
+                background-color: #262626;
+                color: #f0f0f0;
+                border: 1px solid #363636;
+                border-radius: 8px;
                 padding: 4px;
                 outline: none;
             }
             QPushButton#categoryBtn {
-                background-color: #343434;
-                color: #ececec;
-                border: 1px solid #484848;
-                border-radius: 5px;
+                background-color: #2e2e2e;
+                color: #f0f0f0;
+                border: 1px solid #3d3d3d;
+                border-radius: 6px;
                 padding: 5px 14px;
                 font-size: 9pt;
                 font-weight: 500;
-                min-height: 20px;
+                min-height: 22px;
             }
             QPushButton#categoryBtn:hover {
-                background-color: #404040;
-                border-color: #585858;
+                background-color: #383838;
+                border-color: #4f4f4f;
                 color: #ffffff;
             }
             QPushButton#categoryBtn:pressed {
-                background-color: #282828;
+                background-color: #242424;
             }
             QPushButton#categoryBtn:disabled {
-                background-color: #262626;
-                border-color: #353535;
-                color: #606060;
+                background-color: #242424;
+                border-color: #303030;
+                color: #555555;
             }
             QScrollArea#itemsScroll {
-                background-color: #202020;
-                border: 1px solid #3c3c3c;
-                border-radius: 6px;
+                background-color: #262626;
+                border: 1px solid #363636;
+                border-radius: 8px;
             }
             QComboBox {
-                background-color: #323232;
-                color: #ececec;
-                border: 1px solid #484848;
-                border-radius: 5px;
+                background-color: #2e2e2e;
+                color: #f0f0f0;
+                border: 1px solid #3d3d3d;
+                border-radius: 6px;
                 padding: 4px 10px;
                 font-size: 9pt;
                 min-height: 20px;
             }
             QComboBox:hover {
-                background-color: #3c3c3c;
-                border-color: #5a5a5a;
+                background-color: #363636;
+                border-color: #4d4d4d;
             }
             QComboBox:focus {
-                border-color: #0078d4;
+                border-color: #4cc2ff;
             }
             QComboBox::drop-down {
                 subcontrol-origin: padding;
@@ -1884,52 +1918,52 @@ class CategorySettingsDialog(QDialog):
             }
             QComboBox QAbstractItemView {
                 background-color: #262626;
-                color: #ececec;
-                border: 1px solid #484848;
+                color: #f0f0f0;
+                border: 1px solid #3d3d3d;
                 border-radius: 6px;
                 padding: 4px;
-                selection-background-color: #3f6f9f;
+                selection-background-color: #0078d4;
                 selection-color: #ffffff;
                 outline: none;
             }
             QComboBox QAbstractItemView::item {
                 min-height: 26px;
                 padding: 4px 8px;
-                border-radius: 3px;
+                border-radius: 4px;
             }
             QDialogButtonBox {
                 dialogbuttonbox-buttons-have-icons: 0;
             }
             QDialogButtonBox QPushButton {
-                background-color: #383838;
-                color: #ececec;
-                border: 1px solid #484848;
-                border-radius: 5px;
+                background-color: #303030;
+                color: #f0f0f0;
+                border: 1px solid #404040;
+                border-radius: 6px;
                 padding: 6px 20px;
                 font-size: 9.5pt;
                 font-weight: 500;
                 min-width: 72px;
             }
             QDialogButtonBox QPushButton:hover {
-                background-color: #444444;
-                border-color: #5c5c5c;
+                background-color: #3a3a3a;
+                border-color: #505050;
                 color: #ffffff;
             }
             QDialogButtonBox QPushButton:pressed {
-                background-color: #2a2a2a;
+                background-color: #242424;
             }
             QScrollBar:vertical {
                 background: transparent;
-                width: 6px;
-                margin: 2px 2px 2px 0;
+                width: 5px;
+                margin: 2px 1px 2px 0;
             }
             QScrollBar::handle:vertical {
-                background: #505050;
+                background: rgba(255, 255, 255, 0.22);
                 min-height: 20px;
-                border-radius: 3px;
+                border-radius: 2.5px;
             }
             QScrollBar::handle:vertical:hover {
-                background: #6e6e6e;
+                background: rgba(255, 255, 255, 0.38);
             }
             QScrollBar::add-line:vertical,
             QScrollBar::sub-line:vertical {
@@ -1991,9 +2025,9 @@ class CategorySettingsDialog(QDialog):
         self.items_scroll.setFixedHeight(190)
         self.items_scroll.setFocusPolicy(Qt.NoFocus)
         self.items_host = QWidget()
-        self.items_host.setStyleSheet("background-color: #202020; border: none;")
+        self.items_host.setStyleSheet("background-color: #262626; border: none;")
         self.items_scroll.viewport().setStyleSheet(
-            "background-color: #202020; border: none;"
+            "background-color: #262626; border: none;"
         )
         self.items_layout = QVBoxLayout(self.items_host)
         self.items_layout.setContentsMargins(6, 6, 6, 6)
@@ -2163,13 +2197,13 @@ class CategorySettingsDialog(QDialog):
             row.setStyleSheet(
                 """
                 QFrame#pinnedRow {
-                    background-color: #272727;
-                    border: 1px solid #363636;
-                    border-radius: 5px;
+                    background-color: #2e2e2e;
+                    border: 1px solid #383838;
+                    border-radius: 6px;
                 }
                 QFrame#pinnedRow:hover {
-                    background-color: #2d2d2d;
-                    border-color: #444444;
+                    background-color: #363636;
+                    border-color: #484848;
                 }
                 """
             )
