@@ -379,10 +379,12 @@ class UiTests(unittest.TestCase):
         self.assertTrue(mime_is_sensitive(mime))
 
     def test_toast_notification(self) -> None:
-        toast = ToastNotification("Copied to clipboard", duration_ms=50)
+        pos = QPoint(300, 400)
+        toast = ToastNotification("Copied to clipboard", duration_ms=50, pos=pos)
         self.assertIn("Copied to clipboard", toast.label.text())
         self.assertTrue(bool(toast.windowFlags() & Qt.ToolTip))
         self.assertTrue(bool(toast.windowFlags() & Qt.WindowStaysOnTopHint))
+        self.assertAlmostEqual(toast.x() + toast.width() // 2, 300, delta=20)
         toast.show()
         self.app.processEvents()
         toast.close()

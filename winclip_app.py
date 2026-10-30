@@ -2482,6 +2482,7 @@ class ToastNotification(QWidget):
         self,
         message: str = "Copied to clipboard",
         duration_ms: int = 500,
+        pos: Optional[QPoint] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -2508,17 +2509,38 @@ class ToastNotification(QWidget):
         layout.addWidget(self.label)
 
         self.adjustSize()
-        self._position_toast()
+        self._position_toast(pos)
 
         QTimer.singleShot(duration_ms, self.close)
 
-    def _position_toast(self) -> None:
-        screen = QGuiApplication.primaryScreen()
-        if screen is not None:
-            geom = screen.geometry()
-            x = geom.x() + (geom.width() - self.width()) // 2
-            y = geom.y() + geom.height() - self.height() - 70
-            self.move(x, y)
+    def _position_toast(self, pos: Optional[QPoint] = None) -> None:
+        cursor = pos if pos is not None else QCursor.pos()
+        screen = None
+        for s in QGuiApplication.screens():
+            if s.geometry().contains(cursor):
+                screen = s
+                break
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+
+        avail = screen.availableGeometry()
+        margin = 12
+
+        # Center horizontally over cursor, clamped to available screen
+        x = cursor.x() - self.width() // 2
+        x = max(avail.left() + margin, min(x, avail.right() - margin - self.width() + 1))
+
+        # Position vertically: below cursor if space permits, otherwise above
+        gap = 18
+        if cursor.y() + gap + self.height() <= avail.bottom() - margin:
+            y = cursor.y() + gap
+        else:
+            y = cursor.y() - gap - self.height()
+
+        y = max(avail.top() + margin, min(y, avail.bottom() - margin - self.height() + 1))
+        self.move(int(x), int(y))
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
