@@ -498,8 +498,8 @@ class TextPreview(QWidget):
 class ImagePreview(QWidget):
     """Rounded, aspect-fit thumbnail loaded at display size (never full size)."""
 
-    THUMB_WIDTH = 112
-    THUMB_HEIGHT = 64
+    THUMB_WIDTH = 236
+    THUMB_HEIGHT = 80
 
     def __init__(self, path: Optional[Path], parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -528,16 +528,16 @@ class ImagePreview(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        outer = QRectF(self.rect())
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#242424"))
-        painter.drawRoundedRect(outer, 5, 5)
+        outer = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        painter.setPen(QPen(QColor("#333333"), 1))
+        painter.setBrush(QColor("#1b1b1b"))
+        painter.drawRoundedRect(outer, 6, 6)
         if self._pixmap is None:
             painter.setPen(QColor(COLOR_MUTED))
             painter.drawText(self.rect(), Qt.AlignCenter, "Image unavailable")
             return
         scaled = self._pixmap.size().scaled(
-            QSize(self.THUMB_WIDTH, self.THUMB_HEIGHT), Qt.KeepAspectRatio
+            QSize(self.THUMB_WIDTH - 4, self.THUMB_HEIGHT - 4), Qt.KeepAspectRatio
         )
         target = QRectF(
             (self.width() - scaled.width()) / 2.0,
@@ -546,7 +546,7 @@ class ImagePreview(QWidget):
             scaled.height(),
         )
         clip = QPainterPath()
-        clip.addRoundedRect(outer, 5, 5)
+        clip.addRoundedRect(outer.adjusted(1, 1, -1, -1), 5, 5)
         painter.save()
         painter.setClipPath(clip)
         painter.drawPixmap(target, self._pixmap, QRectF(self._pixmap.rect()))
@@ -593,30 +593,10 @@ class ClipCard(QWidget):
         row.setSpacing(8)
 
         if item["type"] == "image":
-            content = QWidget(self)
-            content.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            content_layout = QHBoxLayout(content)
-            content_layout.setContentsMargins(0, 0, 0, 0)
-            content_layout.setSpacing(10)
-            content_layout.addWidget(ImagePreview(image_path, content), 0, Qt.AlignVCenter)
-            meta = QWidget(content)
-            meta.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            meta_layout = QVBoxLayout(meta)
-            meta_layout.setContentsMargins(0, 0, 0, 0)
-            meta_layout.setSpacing(2)
-            title = QLabel("Image")
-            title.setStyleSheet(f"color: {COLOR_TEXT}; font-size: 10pt;")
-            dims = QLabel(f"{item.get('width', '?')} × {item.get('height', '?')}")
-            dims.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 9pt;")
-            for label in (title, dims):
-                label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            meta_layout.addWidget(title)
-            meta_layout.addWidget(dims)
-            meta_layout.addStretch(1)
-            content_layout.addWidget(meta, 1, Qt.AlignVCenter)
-            content.setFixedWidth(PREVIEW_WIDTH)
-            row.addWidget(content, 0, Qt.AlignVCenter)
-            card_height = ImagePreview.THUMB_HEIGHT + 20
+            preview = ImagePreview(image_path, self)
+            preview.setToolTip(f"{item.get('width', '?')} × {item.get('height', '?')}")
+            row.addWidget(preview, 0, Qt.AlignVCenter)
+            card_height = ImagePreview.THUMB_HEIGHT + 18
         else:
             preview = TextPreview(str(item.get("text", "")), font, self)
             row.addWidget(preview, 0, Qt.AlignVCenter)
