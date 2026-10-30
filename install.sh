@@ -82,6 +82,31 @@ if [ -n "${DISPLAY:-}" ]; then
     disown 2>/dev/null || true
 fi
 
+# ------------------------------------------------------------------ shortcuts
+if command -v gsettings >/dev/null 2>&1 && [ -n "${DISPLAY:-}" ]; then
+    python3 -c "
+import subprocess, ast
+try:
+    res = subprocess.run(['gsettings', 'get', 'org.cinnamon.desktop.keybindings', 'custom-list'], capture_output=True, text=True)
+    if res.returncode == 0:
+        lst = ast.literal_eval(res.stdout.strip())
+        if not isinstance(lst, list): lst = []
+        conf = {
+            'custom0': ('WinClip Snip', '$LAUNCHER snip', \"['<Super><Shift>s', '<Shift><Super>s']\"),
+            'custom1': ('WinClip', '$LAUNCHER show', \"['<Super>v']\"),
+        }
+        for k, (name, cmd, bind) in conf.items():
+            if k not in lst: lst.append(k)
+            pfx = f'org.cinnamon.desktop.keybindings.custom-keybinding:/org/cinnamon/desktop/keybindings/custom-keybindings/{k}/'
+            subprocess.run(['gsettings', 'set', pfx, 'name', name], check=True)
+            subprocess.run(['gsettings', 'set', pfx, 'command', cmd], check=True)
+            subprocess.run(['gsettings', 'set', pfx, 'binding', bind], check=True)
+        subprocess.run(['gsettings', 'set', 'org.cinnamon.desktop.keybindings', 'custom-list', str(lst)], check=True)
+except Exception:
+    pass
+" 2>/dev/null || true
+fi
+
 case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
     *)
