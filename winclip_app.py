@@ -167,7 +167,17 @@ def _run_xdotool(args: List[str], timeout: float = 1.2) -> Optional[subprocess.C
 
 def active_window_id() -> Optional[int]:
     """Read the currently focused X11 window before our popup is shown."""
-    # Fast path: Read _NET_ACTIVE_WINDOW directly from the root window using xprop
+    # Fast path: xdotool getwindowfocus gets the exact focused subwindow/popup
+    out = _run_xdotool(["getwindowfocus"], timeout=0.6)
+    if out is not None and out.returncode == 0:
+        try:
+            wid = int(out.stdout.strip().splitlines()[-1])
+            if wid > 0:
+                return wid
+        except (ValueError, IndexError):
+            pass
+
+    # Fallback to _NET_ACTIVE_WINDOW directly from the root window using xprop
     try:
         res = subprocess.run(
             ["xprop", "-root", "_NET_ACTIVE_WINDOW"],
@@ -190,7 +200,7 @@ def active_window_id() -> Optional[int]:
     except Exception:
         pass
 
-    # Fallback to xdotool
+    # Final fallback to getactivewindow
     result = _run_xdotool(["getactivewindow"], timeout=1.0)
     if result is None or result.returncode != 0:
         return None
@@ -237,13 +247,12 @@ def is_terminal_class(wm_class: str) -> bool:
 
 def refocus_and_paste(window_id: Optional[int], terminal: bool) -> None:
     """Refocus the previous window and inject the right paste shortcut."""
-    if window_id is None:
-        return
-    target = str(window_id)
-    result = _run_xdotool(["windowactivate", "--sync", target], timeout=1.5)
-    if result is None or result.returncode != 0:
-        # windowactivate depends on EWMH support; windowfocus is a fallback.
-        _run_xdotool(["windowfocus", target], timeout=1.0)
+    if window_id is not None:
+        target = str(window_id)
+        # Use windowfocus first to preserve popup/subwindow focus without deactivating it via WM
+        res = _run_xdotool(["windowfocus", target], timeout=0.8)
+        if res is None or res.returncode != 0:
+            _run_xdotool(["windowactivate", "--sync", target], timeout=1.0)
     time.sleep(PASTE_DELAY_MS / 1000.0)
     combo = "ctrl+shift+v" if terminal else "ctrl+v"
     _run_xdotool(["key", "--clearmodifiers", combo], timeout=1.0)
@@ -1115,11 +1124,12 @@ class ClipboardPopup(QWidget):
             Qt.Tool
             | Qt.FramelessWindowHint
             | Qt.WindowStaysOnTopHint
+            | Qt.WindowDoesNotAcceptFocus
             | Qt.NoDropShadowWindowHint
         )
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_DeleteOnClose, False)
-        self.setFocusPolicy(Qt.StrongFocus)
         self.setFixedWidth(PANEL_WIDTH + SHADOW_MARGIN * 2)
 
         self._items: List[Dict[str, Any]] = []
@@ -1136,6 +1146,9 @@ class ClipboardPopup(QWidget):
         self._hide_timer.setSingleShot(True)
         self._hide_timer.setInterval(140)
         self._hide_timer.timeout.connect(self._hide_if_inactive)
+        self._click_check_timer = QTimer(self)
+        self._click_check_timer.setInterval(50)
+        self._click_check_timer.timeout.connect(self._check_outside_click)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(SHADOW_MARGIN, SHADOW_MARGIN, SHADOW_MARGIN, SHADOW_MARGIN)
@@ -1475,10 +1488,19 @@ class ClipboardPopup(QWidget):
         if self.isVisible():
             self._hide_timer.start()
 
+    def _check_outside_click(self) -> None:
+        if not self.isVisible() or not self._focus_armed:
+            return
+        if QApplication.mouseButtons() != Qt.NoButton:
+            if not self.geometry().contains(QCursor.pos()):
+                self.hide()
+
     def _hide_if_inactive(self) -> None:
         if not self.isVisible() or not self._focus_armed:
             return
         if self._other_popup_open():
+            return
+        if bool(self.windowFlags() & Qt.WindowDoesNotAcceptFocus):
             return
         handle = self.windowHandle()
         if handle is not None and handle.isActive():
@@ -1496,6 +1518,8 @@ class ClipboardPopup(QWidget):
             return
         if self._other_popup_open():
             return
+        if bool(self.windowFlags() & Qt.WindowDoesNotAcceptFocus):
+            return
         if new is None or not (new is self or self.isAncestorOf(new)):
             self._schedule_hide_check()
 
@@ -1503,6 +1527,8 @@ class ClipboardPopup(QWidget):
         if not self.isVisible() or not self._focus_armed:
             return
         if self._other_popup_open():
+            return
+        if bool(self.windowFlags() & Qt.WindowDoesNotAcceptFocus):
             return
         own = self.windowHandle()
         if own is not None and window is not own:
@@ -1516,27 +1542,32 @@ class ClipboardPopup(QWidget):
         self._focus_armed = False
         QTimer.singleShot(220, self._arm_focus)
         self.raise_()
-        self.activateWindow()
-        self.setFocus(Qt.OtherFocusReason)
-        QTimer.singleShot(0, self._focus_self)
-
-    def _focus_self(self) -> None:
-        if self.isVisible():
-            self.setFocus(Qt.OtherFocusReason)
+        try:
+            self.grabKeyboard()
+        except Exception:
+            pass
+        self._click_check_timer.start()
 
     def hideEvent(self, event) -> None:  # noqa: N802
         self._focus_armed = False
-        self.clearFocus()
+        self._click_check_timer.stop()
+        try:
+            self.releaseKeyboard()
+        except Exception:
+            pass
         if hasattr(self, "scroll") and hasattr(self.scroll, "stop_animation"):
             self.scroll.stop_animation()
         super().hideEvent(event)
 
     def reactivate(self) -> None:
         self.raise_()
-        self.activateWindow()
-        self.setFocus(Qt.OtherFocusReason)
+        try:
+            self.grabKeyboard()
+        except Exception:
+            pass
         self._focus_armed = False
         QTimer.singleShot(220, self._arm_focus)
+        self._click_check_timer.start()
 
     # ---------------------------------------------------------------- contents
 
@@ -2953,7 +2984,7 @@ class WinClipDaemon(QObject):
     def request_show(self) -> None:
         try:
             if self.popup is not None and self.popup.isVisible():
-                self.popup.reactivate()
+                self.popup.hide()
                 return
 
             # The order is important: capture the window before our popup is
@@ -3091,6 +3122,9 @@ class WinClipDaemon(QObject):
             self._internal_fingerprint = str(item["fingerprint"])
             self._internal_deadline = time.monotonic() + 2.0
             self.clipboard.setMimeData(mime, QClipboard.Clipboard)
+            mime_sel = self._make_mime_for_item(item)
+            if mime_sel is not None:
+                self.clipboard.setMimeData(mime_sel, QClipboard.Selection)
 
             if self.popup is not None:
                 self.popup.hide()

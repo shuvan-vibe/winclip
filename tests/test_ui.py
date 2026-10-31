@@ -78,7 +78,7 @@ class UiTests(unittest.TestCase):
         self.assertEqual(popup.panel.width(), PANEL_WIDTH)
         self.assertLessEqual(popup.panel.height(), MAX_PANEL_HEIGHT)
         self.assertTrue(popup.isVisible())
-        self.assertTrue(popup.hasFocus())
+        self.assertTrue(bool(popup.windowFlags() & Qt.WindowDoesNotAcceptFocus))
         self.assertEqual(popup.findChildren(QLineEdit), [])
         self.assertEqual(popup.category_tabs.count(), 4)
         self.assertEqual(
