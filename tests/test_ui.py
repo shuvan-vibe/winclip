@@ -283,7 +283,7 @@ class UiTests(unittest.TestCase):
     def test_max_height_with_many_items(self) -> None:
         popup = self._make_popup(tuple(f"item {i} " * 20 for i in range(30)))
         self.assertLessEqual(popup.panel.height(), MAX_PANEL_HEIGHT)
-        self.assertEqual(len(popup._cards), 25)
+        self.assertEqual(len(popup._cards), 15)
         self.assertLess(popup.scroll.height(), popup.list_layout.sizeHint().height())
 
     def test_empty_state_and_clear_button(self) -> None:

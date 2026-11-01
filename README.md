@@ -53,7 +53,7 @@ Traditional Linux clipboard managers (like CopyQ or GPaste) often feature clunky
 - **✂️ Windows 11 Snip Tool (<kbd>Shift</kbd>+<kbd>Super</kbd>+<kbd>S</kbd>)**: Instant screen capture with dimmed overlay, live window detection on hover, interactive rectangle drag with size indicators, auto-save to `~/Pictures/Screenshots`, and instant copy to clipboard.
 - **📸 Direct Full-Screen Shot (`winclip shot`)**: Instant full-screen screenshot saved directly to disk (`~/Pictures/Screenshots`) without polluting your clipboard history.
 - **🖼️ Rich Text & Images**: Automatically captures formatted text, URLs, code blocks, and images with borderless high-DPI thumbnails.
-- **📌 Pinned Clips**: Important snippets never expire (unlike the 25-item recent history).
+- **📌 Pinned Clips**: Important snippets never expire (unlike the 15-item recent history).
 - **🏷️ Customizable Categories**: Filter pinned items by category tabs (*TG*, *VK*, *Insta*, *Work*, *Templates*).
 - **🔀 Reorder Pinned Items**: Reorder pinned clips with drag-and-drop or <kbd>Ctrl</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd>.
 - **🎯 Focus Restoration & Auto-Paste**: Remembers the window you were typing in, restores its focus, and pastes instantly.

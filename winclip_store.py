@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-UNPINNED_LIMIT = 25
+UNPINNED_LIMIT = int(os.environ.get("WINCLIP_MAX_ITEMS", "15"))
 HISTORY_VERSION = 1
 SETTINGS_VERSION = 1
 DEFAULT_CATEGORIES = ("TG", "VK", "Insta")
@@ -49,7 +49,7 @@ class HistoryStore:
 
     Newest items are first in ``items``. Pinned items stay in the same list
     but get grouped visually by the popup. There can be any number of pinned
-    items; only the 25 newest unpinned items are retained.
+    items; only the 15 newest unpinned items are retained.
 
     Categories are labels that pinned items can be assigned to. They live in
     ``settings.json`` next to the history so the popup always knows which

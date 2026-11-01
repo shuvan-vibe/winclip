@@ -53,7 +53,7 @@ class HistoryStoreTests(unittest.TestCase):
         self.assertEqual(rebuilt.items[0]["text"], "persisted")
         self.assertTrue(rebuilt.items[0]["pinned"])
 
-    def test_keeps_25_unpinned_and_never_drops_pinned(self) -> None:
+    def test_keeps_15_unpinned_and_never_drops_pinned(self) -> None:
         pinned = self._add("keep me")
         self.store.toggle_pin(pinned["id"])
         for index in range(UNPINNED_LIMIT + 7):
