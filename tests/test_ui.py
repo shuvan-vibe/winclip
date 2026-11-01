@@ -676,6 +676,25 @@ class UiTests(unittest.TestCase):
             popup._check_outside_click()
             self.assertFalse(popup.isVisible())
 
+    def test_popup_widget_cache_reuses_cards_when_unchanged(self) -> None:
+        popup = self._make_popup(("item A", "item B"))
+        self.assertEqual(len(popup._cards), 2)
+        initial_card0 = popup._cards[0]
+        initial_card1 = popup._cards[1]
+
+        # Call show_history with the exact same items
+        popup.show_history(self.store.items)
+        self.assertEqual(len(popup._cards), 2)
+        # Verify cards were preserved rather than destroyed and rebuilt
+        self.assertIs(popup._cards[0], initial_card0)
+        self.assertIs(popup._cards[1], initial_card1)
+
+        # Call show_history with modified items (new copy added)
+        self.store.add_text("item C")
+        popup.show_history(self.store.items)
+        self.assertEqual(len(popup._cards), 3)
+        self.assertIsNot(popup._cards[0], initial_card0)
+
 
 if __name__ == "__main__":
     unittest.main()

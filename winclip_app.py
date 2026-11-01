@@ -231,6 +231,41 @@ class X11Helper:
             pass
         return None
 
+    def get_window_class(self, wid: int) -> str:
+        """Read WM_CLASS directly from an X11 window without subprocesses."""
+        if not self._display or not self._x11 or wid <= 0:
+            return ""
+        atom = self._x11.XInternAtom(self._display, b"WM_CLASS", False)
+        actual_type = ctypes.c_ulong()
+        actual_format = ctypes.c_int()
+        nitems = ctypes.c_ulong()
+        bytes_after = ctypes.c_ulong()
+        prop = ctypes.c_void_p()
+        try:
+            # 31 = XA_STRING atom
+            res = self._x11.XGetWindowProperty(
+                self._display,
+                wid,
+                atom,
+                0,
+                1024,
+                False,
+                31,
+                ctypes.byref(actual_type),
+                ctypes.byref(actual_format),
+                ctypes.byref(nitems),
+                ctypes.byref(bytes_after),
+                ctypes.byref(prop),
+            )
+            if res == 0 and prop.value:
+                raw = ctypes.string_at(prop.value, nitems.value)
+                self._x11.XFree(prop)
+                parts = [p.decode("utf-8", "ignore") for p in raw.split(b"\x00") if p]
+                return " ".join(parts)
+        except Exception:
+            pass
+        return ""
+
     def close(self) -> None:
         if self._display and self._x11:
             try:
@@ -263,7 +298,12 @@ def _run_xdotool(args: List[str], timeout: float = 1.2) -> Optional[subprocess.C
 
 def active_window_id() -> Optional[int]:
     """Read the currently focused X11 window before our popup is shown."""
-    # Fast path: xdotool getwindowfocus gets the exact focused subwindow/popup
+    # Ultra-fast path: In-process C query for _NET_ACTIVE_WINDOW without subprocess (~10 microseconds)
+    wid = _x11_helper.get_active_window()
+    if wid is not None:
+        return wid
+
+    # Fallback: xdotool getwindowfocus gets the exact focused subwindow/popup
     out = _run_xdotool(["getwindowfocus"], timeout=0.6)
     if out is not None and out.returncode == 0:
         try:
@@ -272,11 +312,6 @@ def active_window_id() -> Optional[int]:
                 return wid
         except (ValueError, IndexError):
             pass
-
-    # In-process C query for _NET_ACTIVE_WINDOW without subprocess
-    wid = _x11_helper.get_active_window()
-    if wid is not None:
-        return wid
 
     # Fallback to _NET_ACTIVE_WINDOW directly from the root window using xprop
     try:
@@ -312,9 +347,12 @@ def active_window_id() -> Optional[int]:
 
 
 def window_class(window_id: Optional[int]) -> str:
-    """Read WM_CLASS with xprop (xdotool has no class-name command)."""
-    if window_id is None:
+    """Read WM_CLASS directly via X11 C call, with xprop fallback."""
+    if window_id is None or window_id <= 0:
         return ""
+    cls = _x11_helper.get_window_class(window_id)
+    if cls:
+        return cls
     try:
         result = subprocess.run(
             ["xprop", "-id", str(window_id), "WM_CLASS"],
@@ -1155,23 +1193,14 @@ class ClipCard(QWidget):
 
 
 class SmoothScrollArea(QScrollArea):
-    """A scroll area with smooth interpolated wheel scrolling and BitBlt acceleration."""
-
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self._anim = QPropertyAnimation(self.verticalScrollBar(), b"value", self)
-        self._anim.setDuration(160)
-        self._anim.setEasingCurve(QEasingCurve.OutCubic)
-        self._target_value = 0
+    """A responsive scroll area with direct 1:1 wheel scrolling and BitBlt acceleration."""
 
     def stop_animation(self) -> None:
-        if self._anim.state() == QPropertyAnimation.Running:
-            self._anim.stop()
+        pass
 
     def wheelEvent(self, event) -> None:  # noqa: N802
         # Touchpads provide smooth high-frequency pixel deltas; let Qt handle them directly.
         if not event.pixelDelta().isNull():
-            self.stop_animation()
             super().wheelEvent(event)
             return
 
@@ -1181,23 +1210,10 @@ class SmoothScrollArea(QScrollArea):
             super().wheelEvent(event)
             return
 
-        # 1 wheel notch moves ~56px (roughly one card)
-        delta = -num_steps * 56.0
+        # 1 wheel notch moves ~56px (roughly one card) instantly without animation lag
+        delta = int(-num_steps * 56.0)
         bar = self.verticalScrollBar()
-
-        if self._anim.state() == QPropertyAnimation.Running:
-            current_target = self._target_value
-        else:
-            current_target = bar.value()
-
-        new_target = int(max(bar.minimum(), min(bar.maximum(), current_target + delta)))
-        self._target_value = new_target
-
-        if new_target != bar.value():
-            self._anim.stop()
-            self._anim.setStartValue(bar.value())
-            self._anim.setEndValue(new_target)
-            self._anim.start()
+        bar.setValue(int(max(bar.minimum(), min(bar.maximum(), bar.value() + delta))))
         event.accept()
 
 
@@ -1248,9 +1264,11 @@ class ClipboardPopup(QWidget):
         self._hide_timer.setInterval(140)
         self._hide_timer.timeout.connect(self._hide_if_inactive)
         self._click_check_timer = QTimer(self)
-        self._click_check_timer.setInterval(25)
+        self._click_check_timer.setInterval(30)
         self._click_check_timer.timeout.connect(self._check_outside_click)
         self._initial_active_window: Optional[int] = None
+        self._last_items_signature: Optional[Tuple[Any, ...]] = None
+        self._tick_count = 0
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(SHADOW_MARGIN, SHADOW_MARGIN, SHADOW_MARGIN, SHADOW_MARGIN)
@@ -1682,6 +1700,7 @@ class ClipboardPopup(QWidget):
         self._focus_armed = False
         self._click_check_timer.stop()
         self._initial_active_window = None
+        self._tick_count = 0
         try:
             self.releaseKeyboard()
         except Exception:
@@ -1697,17 +1716,40 @@ class ClipboardPopup(QWidget):
         except Exception:
             pass
         self._focus_armed = False
+        self._tick_count = 0
         self._initial_active_window = _x11_helper.get_active_window()
         QTimer.singleShot(180, self._arm_focus)
         self._click_check_timer.start()
 
     # ---------------------------------------------------------------- contents
 
+    def _items_signature(self) -> Tuple[Any, ...]:
+        return (
+            self._category,
+            tuple(
+                (
+                    item.get("id"),
+                    item.get("pinned"),
+                    item.get("pin_order"),
+                    item.get("category"),
+                    item.get("text"),
+                    item.get("file"),
+                )
+                for item in self._items
+            ),
+        )
+
     def show_history(self, items: List[Dict[str, Any]]) -> None:
         self._items = list(items)
-        self._selected_id = None
-        self._rebuild(keep_selection=False)
-        self._resize_to_contents()
+        sig = self._items_signature()
+        if sig != self._last_items_signature or not self._cards:
+            self._selected_id = None
+            self._rebuild(keep_selection=False)
+            self._resize_to_contents()
+        else:
+            self._selected_id = str(self._cards[0].item["id"]) if self._cards else None
+            self._apply_selection()
+            self.scroll.verticalScrollBar().setValue(0)
         self._position_near_cursor()
         self._initial_active_window = _x11_helper.get_active_window()
         self.show()
@@ -1809,6 +1851,7 @@ class ClipboardPopup(QWidget):
 
         unpinned = any(not item.get("pinned") for item in self._items)
         self.clear_button.setEnabled(unpinned)
+        self._last_items_signature = self._items_signature()
 
     def _add_empty_state(self) -> None:
         holder = QWidget(self.content)
