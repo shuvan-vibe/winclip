@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -634,6 +635,46 @@ class UiTests(unittest.TestCase):
         self.assertIs(pix1, pix2)
         popup.close()
         self.app.processEvents()
+
+    def test_popup_closes_on_outside_click(self) -> None:
+        from winclip_app import _x11_helper
+        popup = self._make_popup()
+        popup._focus_armed = True
+        popup.move(100, 100)
+        self.assertTrue(popup.isVisible())
+
+        # Simulate button press outside popup
+        with mock.patch.object(_x11_helper, "is_button_pressed", return_value=True):
+            with mock.patch("PyQt5.QtGui.QCursor.pos", return_value=QPoint(800, 800)):
+                popup._check_outside_click()
+                self.assertFalse(popup.isVisible())
+
+    def test_popup_retains_on_inside_click(self) -> None:
+        from winclip_app import _x11_helper
+        popup = self._make_popup()
+        popup._focus_armed = True
+        popup.move(100, 100)
+        self.assertTrue(popup.isVisible())
+
+        # Simulate button press inside panel
+        panel_geom = popup.panel.geometry()
+        inside_point = popup.mapToGlobal(panel_geom.center())
+        with mock.patch.object(_x11_helper, "is_button_pressed", return_value=True):
+            with mock.patch("PyQt5.QtGui.QCursor.pos", return_value=inside_point):
+                popup._check_outside_click()
+                self.assertTrue(popup.isVisible())
+
+    def test_popup_closes_on_active_window_change(self) -> None:
+        from winclip_app import _x11_helper
+        popup = self._make_popup()
+        popup._focus_armed = True
+        popup._initial_active_window = 12345
+        self.assertTrue(popup.isVisible())
+
+        # If another window activates (e.g. 99999), popup hides
+        with mock.patch.object(_x11_helper, "get_active_window", return_value=99999):
+            popup._check_outside_click()
+            self.assertFalse(popup.isVisible())
 
 
 if __name__ == "__main__":

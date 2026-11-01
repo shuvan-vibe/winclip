@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import gc
 import os
 import re
@@ -147,6 +148,101 @@ def _warn(message: str) -> None:
 # X11 / xdotool integration
 
 
+class X11Helper:
+    """Zero-dependency X11 helper for global pointer query and active window tracking."""
+
+    def __init__(self) -> None:
+        self._display = None
+        self._x11 = None
+        self._net_active_atom = 0
+        self._root = None
+        try:
+            self._x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
+            self._display = self._x11.XOpenDisplay(None)
+            if self._display:
+                self._root = self._x11.XDefaultRootWindow(self._display)
+                self._net_active_atom = self._x11.XInternAtom(
+                    self._display, b"_NET_ACTIVE_WINDOW", False
+                )
+        except Exception:
+            self._display = None
+            self._x11 = None
+
+    def is_button_pressed(self) -> bool:
+        """Return True if mouse buttons 1, 2, or 3 are pressed anywhere on the X11 screen."""
+        if not self._display or not self._x11 or not self._root:
+            return QApplication.mouseButtons() != Qt.NoButton
+        root_ret = ctypes.c_ulong()
+        child_ret = ctypes.c_ulong()
+        root_x = ctypes.c_int()
+        root_y = ctypes.c_int()
+        win_x = ctypes.c_int()
+        win_y = ctypes.c_int()
+        mask = ctypes.c_uint()
+        try:
+            res = self._x11.XQueryPointer(
+                self._display,
+                self._root,
+                ctypes.byref(root_ret),
+                ctypes.byref(child_ret),
+                ctypes.byref(root_x),
+                ctypes.byref(root_y),
+                ctypes.byref(win_x),
+                ctypes.byref(win_y),
+                ctypes.byref(mask),
+            )
+            if res:
+                # Button1Mask = 0x100, Button2Mask = 0x200, Button3Mask = 0x400
+                return bool(mask.value & 0x700)
+        except Exception:
+            pass
+        return False
+
+    def get_active_window(self) -> Optional[int]:
+        """Read _NET_ACTIVE_WINDOW directly from the X11 root window without subprocesses."""
+        if not self._display or not self._x11 or not self._root or not self._net_active_atom:
+            return None
+        actual_type = ctypes.c_ulong()
+        actual_format = ctypes.c_int()
+        nitems = ctypes.c_ulong()
+        bytes_after = ctypes.c_ulong()
+        prop = ctypes.c_void_p()
+        try:
+            # 33 = XA_WINDOW atom
+            res = self._x11.XGetWindowProperty(
+                self._display,
+                self._root,
+                self._net_active_atom,
+                0,
+                1,
+                False,
+                33,
+                ctypes.byref(actual_type),
+                ctypes.byref(actual_format),
+                ctypes.byref(nitems),
+                ctypes.byref(bytes_after),
+                ctypes.byref(prop),
+            )
+            if res == 0 and prop.value:
+                wid = ctypes.cast(prop, ctypes.POINTER(ctypes.c_ulong)).contents.value
+                self._x11.XFree(prop)
+                return wid if wid > 0 else None
+        except Exception:
+            pass
+        return None
+
+    def close(self) -> None:
+        if self._display and self._x11:
+            try:
+                self._x11.XCloseDisplay(self._display)
+            except Exception:
+                pass
+            self._display = None
+
+
+_x11_helper = X11Helper()
+
+
 def _run_xdotool(args: List[str], timeout: float = 1.2) -> Optional[subprocess.CompletedProcess]:
     try:
         return subprocess.run(
@@ -176,6 +272,11 @@ def active_window_id() -> Optional[int]:
                 return wid
         except (ValueError, IndexError):
             pass
+
+    # In-process C query for _NET_ACTIVE_WINDOW without subprocess
+    wid = _x11_helper.get_active_window()
+    if wid is not None:
+        return wid
 
     # Fallback to _NET_ACTIVE_WINDOW directly from the root window using xprop
     try:
@@ -1147,8 +1248,9 @@ class ClipboardPopup(QWidget):
         self._hide_timer.setInterval(140)
         self._hide_timer.timeout.connect(self._hide_if_inactive)
         self._click_check_timer = QTimer(self)
-        self._click_check_timer.setInterval(50)
+        self._click_check_timer.setInterval(25)
         self._click_check_timer.timeout.connect(self._check_outside_click)
+        self._initial_active_window: Optional[int] = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(SHADOW_MARGIN, SHADOW_MARGIN, SHADOW_MARGIN, SHADOW_MARGIN)
@@ -1476,6 +1578,8 @@ class ClipboardPopup(QWidget):
     def _arm_focus(self) -> None:
         if self.isVisible():
             self._focus_armed = True
+            if self._initial_active_window is None:
+                self._initial_active_window = _x11_helper.get_active_window()
 
     def event(self, event) -> bool:
         if event.type() == QEvent.WindowActivate:
@@ -1488,12 +1592,42 @@ class ClipboardPopup(QWidget):
         if self.isVisible():
             self._hide_timer.start()
 
+    def _other_popup_open(self) -> bool:
+        popup = QApplication.activePopupWidget()
+        if popup is not None and popup is not self:
+            return True
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, QMenu) and widget.isVisible():
+                return True
+        return False
+
     def _check_outside_click(self) -> None:
         if not self.isVisible() or not self._focus_armed:
             return
-        if QApplication.mouseButtons() != Qt.NoButton:
-            if not self.geometry().contains(QCursor.pos()):
+        if self._other_popup_open():
+            return
+        if QWidget.mouseGrabber() is not None:
+            return
+
+        # 1. Did the user press a mouse button anywhere outside the popup panel?
+        if _x11_helper.is_button_pressed():
+            panel_geom = self.panel.geometry()
+            top_left = self.mapToGlobal(panel_geom.topLeft())
+            panel_global = QRect(top_left, panel_geom.size())
+            if not panel_global.contains(QCursor.pos()):
                 self.hide()
+                return
+
+        # 2. Did the active window change (e.g. user Alt-Tabbed or clicked another window)?
+        if self._initial_active_window is not None:
+            current_active = _x11_helper.get_active_window()
+            if (
+                current_active is not None
+                and current_active != self._initial_active_window
+                and current_active != int(self.winId())
+            ):
+                self.hide()
+                return
 
     def _hide_if_inactive(self) -> None:
         if not self.isVisible() or not self._focus_armed:
@@ -1508,10 +1642,6 @@ class ClipboardPopup(QWidget):
         if QApplication.activeWindow() is self:
             return
         self.hide()
-
-    def _other_popup_open(self) -> bool:
-        popup = QApplication.activePopupWidget()
-        return popup is not None and popup is not self
 
     def _on_focus_changed(self, old, new) -> None:
         if not self.isVisible() or not self._focus_armed:
@@ -1540,7 +1670,7 @@ class ClipboardPopup(QWidget):
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
         self._focus_armed = False
-        QTimer.singleShot(220, self._arm_focus)
+        QTimer.singleShot(180, self._arm_focus)
         self.raise_()
         try:
             self.grabKeyboard()
@@ -1551,6 +1681,7 @@ class ClipboardPopup(QWidget):
     def hideEvent(self, event) -> None:  # noqa: N802
         self._focus_armed = False
         self._click_check_timer.stop()
+        self._initial_active_window = None
         try:
             self.releaseKeyboard()
         except Exception:
@@ -1566,7 +1697,8 @@ class ClipboardPopup(QWidget):
         except Exception:
             pass
         self._focus_armed = False
-        QTimer.singleShot(220, self._arm_focus)
+        self._initial_active_window = _x11_helper.get_active_window()
+        QTimer.singleShot(180, self._arm_focus)
         self._click_check_timer.start()
 
     # ---------------------------------------------------------------- contents
@@ -1577,6 +1709,7 @@ class ClipboardPopup(QWidget):
         self._rebuild(keep_selection=False)
         self._resize_to_contents()
         self._position_near_cursor()
+        self._initial_active_window = _x11_helper.get_active_window()
         self.show()
 
     def refresh_history(
@@ -3242,6 +3375,7 @@ class WinClipDaemon(QObject):
             self.socket_file.unlink()
         except OSError:
             pass
+        _x11_helper.close()
 
 
 def run_daemon(
